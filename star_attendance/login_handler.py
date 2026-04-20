@@ -792,7 +792,7 @@ class LoginHandler:
                     try:
                         # Detection: Look for the 'tkv' input which signals the login form is ready.
                         # Increased timeout to 60s for slow WAF handshakes.
-                        await page.wait_for_selector('input[name="tkv"]', timeout=45000)
+                        await page.wait_for_selector('input[name="tkv"]', state="attached", timeout=45000)
                         log("SUCCESS", "event=waf_browser status=ready message='WAF cleared, login form detected'")
                     except Exception as e:
                         content = await page.content()
