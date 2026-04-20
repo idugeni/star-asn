@@ -57,6 +57,27 @@ def get_context_prefix() -> str:
     return f"ctx={ctx} " if ctx else ""
 
 
+MASTER_IDENTITY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+MASTER_IDENTITY_HEADERS = {
+    "User-Agent": MASTER_IDENTITY_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "DNT": "1",
+    "Sec-Ch-Ua": '"Google Chrome";v="147", "Chromium";v="147", "Not.A/Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Connection": "keep-alive",
+}
+
+
 def log(level: str, msg: str) -> None:
     colors = {"INFO": Fore.BLUE, "WARN": Fore.YELLOW, "ERROR": Fore.RED, "SUCCESS": Fore.GREEN}
     color = colors.get(level, Fore.WHITE)
@@ -79,34 +100,13 @@ class LoginHandler:
         proxy: str | None = None,
     ) -> None:
         self.base_url = base_url
-        # Default Master Identity (Chrome 147)
-        self.user_agent = (
-            user_agent
-            or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-        )
+        self.user_agent = user_agent or MASTER_IDENTITY_UA
         self.proxy = proxy
 
         self.client: Any = AsyncSession(impersonate="chrome120", verify=False, timeout=30, proxy=self.proxy)
-        self.client.headers.update(
-            {
-                "User-Agent": self.user_agent,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "Accept-Encoding": "gzip, deflate, br, zstd",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Cache-Control": "no-cache",
-                "DNT": "1",
-                "Pragma": "no-cache",
-                "Priority": "u=0, i",
-                "Sec-Ch-Ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
-                "Sec-Ch-Ua-Mobile": "?0",
-                "Sec-Ch-Ua-Platform": '"Windows"',
-                "Sec-Fetch-Dest": "document",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-Site": "none",
-                "Sec-Fetch-User": "?1",
-                "Upgrade-Insecure-Requests": "1",
-            }
-        )
+        self.client.headers.update(MASTER_IDENTITY_HEADERS)
+        if user_agent:
+            self.client.headers["User-Agent"] = user_agent
 
         # --- "MASTER OF MASTER" INJECTION ---
         if LoginHandler._waf_cookies and isinstance(LoginHandler._waf_cookies, list):
