@@ -781,25 +781,11 @@ class LoginHandler:
                     if status_callback:
                         await status_callback("⏳ Menunggu verifikasi WAF (Cloudflare/Citrix)...")
 
-                    # --- OPTIMIZATION: ASSET BLOCKING & ROUTE INTERCEPTION ---
-                    async def intercepted_request(route):
-                        resource_type = route.request.resource_type
-                        url = route.request.url.lower()
-
-                        # Block heavy assets except Captcha
-                        if resource_type in ["image", "font", "media", "stylesheet"]:
-                            if "captcha" not in url:
-                                return await route.abort()
-
-                        # Block non-essential tracking/animation scripts
-                        blocklist = ["aos.js", "particles.js", "lord-icon", "google-analytics", "font-awesome"]
-                        if any(b in url for b in blocklist):
-                            return await route.abort()
-
-                        return await route.continue_()
-
-                    await page.route("**/*", intercepted_request)
-                    await page.goto(login_url)
+                    # --- HUMAN-LIKE HANDSHAKE: Loading full assets for correct fingerprinting ---
+                    # We no longer block CSS or Images during WAF bypass to ensure Cloudflare/Citrix 
+                    # integrity checks pass (fingerprinting depends on CSS/Asset rendering).
+                    # We use 'commit' for faster initiation followed by targeted waiting.
+                    await page.goto(login_url, wait_until="commit", timeout=60000)
 
                     # 1. Wait for WAF to clear and Login Page to appear
                     log("INFO", "event=waf_browser status=waiting action=clearing_waf")
