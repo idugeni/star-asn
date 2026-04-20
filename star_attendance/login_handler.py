@@ -803,28 +803,17 @@ class LoginHandler:
 
                     # 1. Wait for WAF to clear and Login Page to appear
                     log("INFO", "event=waf_browser status=waiting action=clearing_waf")
-
-                    # Check for TKV every 0.5s for faster handshake
-                    is_ready = False
-                    for _ in range(60):
-                        try:
-                            page_content = await page.content()
-                        except Exception as exc:
-                            log("WARN", f"event=waf_browser status=waiting retry=navigation message={exc}")
-                            await asyncio.sleep(0.5)
-                            continue
-                        if 'name="tkv"' in page_content:
-                            is_ready = True
-                            break
-                        if "authentication/login" not in page.url:
-                            await page.goto(login_url, wait_until="commit")
-                        await asyncio.sleep(0.5)
-
-                    if not is_ready:
-                        log("ERROR", "event=waf_browser status=timeout message='Login page never appeared'")
+                    try:
+                        # Detection: Look for the 'tkv' input which signals the login form is ready.
+                        # Increased timeout to 60s for slow WAF handshakes.
+                        await page.wait_for_selector('input[name="tkv"]', timeout=60000)
+                        log("SUCCESS", "event=waf_browser status=ready message='WAF cleared, login form detected'")
+                    except Exception as e:
+                        log("ERROR", f"event=waf_browser status=timeout message='WAF did not clear or login form not found: {e}'")
                         await portal_circuit_breaker.record_failure("browser_bridge_timeout")
                         await browser.close()
                         return None
+
 
                     # 2. Fast-Wait: Continue as soon as form is interactive
                     await page.wait_for_selector('input[name="username"]', state="attached", timeout=45000)
