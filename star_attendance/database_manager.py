@@ -1,0 +1,1136 @@
+import json
+import threading
+import time
+import uuid
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, cast
+
+from sqlalchemy import func, text
+from sqlalchemy.orm import joinedload
+
+from star_attendance.core.config import settings
+from star_attendance.core.security import security_manager
+from star_attendance.core.timeutils import (
+    format_formal_timestamp,
+    isoformat_local,
+    local_date,
+    local_day_bounds,
+    now_storage,
+    now_utc,
+    to_local,
+)
+from star_attendance.db.manager import db_manager
+from star_attendance.db.models import AuditLog, GlobalSetting, UPT, User, UserSession
+from star_attendance.db.enums import AuditAction, AuditStatus
+from star_attendance.db.types import AuditLogData, UserData
+
+DEFAULT_LOCATION_LATITUDE = -6.2210973
+DEFAULT_LOCATION_LONGITUDE = 106.8314724
+DEFAULT_WORKDAYS = "mon-fri"
+
+WORKDAY_PRESETS: Dict[str, Dict[str, str]] = {
+    "mon-fri": {"label": "Senin-Jumat", "cron": "mon-fri"},
+    "mon-sat": {"label": "Senin-Sabtu", "cron": "mon-sat"},
+    "everyday": {"label": "Setiap Hari", "cron": "mon-sun"},
+}
+
+WORKDAY_ALIASES = {
+    "mon-fri": "mon-fri",
+    "monday-friday": "mon-fri",
+    "senin-jumat": "mon-fri",
+    "seninjumat": "mon-fri",
+    "weekdays": "mon-fri",
+    "mon-sat": "mon-sat",
+    "monday-saturday": "mon-sat",
+    "senin-sabtu": "mon-sat",
+    "seninsabtu": "mon-sat",
+    "everyday": "everyday",
+    "daily": "everyday",
+    "all-days": "everyday",
+    "setiap-hari": "everyday",
+    "setiaphari": "everyday",
+    "mon-sun": "everyday",
+    "*": "everyday",
+}
+
+DEFAULT_SETTINGS: Dict[str, Any] = {
+    "default_location": "Kementerian Imigrasi dan Pemasyarakatan Republik Indonesia",
+    "default_latitude": DEFAULT_LOCATION_LATITUDE,
+    "default_longitude": DEFAULT_LOCATION_LONGITUDE,
+    "timezone": "Asia/Jakarta",
+    "ocr_engine": settings.OCR_ENGINE,
+    "automation_enabled": True,
+    "cron_in": "07:00",
+    "cron_out": "18:00",
+    "default_workdays": DEFAULT_WORKDAYS,
+    "time_storage_version": "timestamptz_v2",
+    "mass_active": "0",
+    "mass_action": "",
+    "mass_pos": "0",
+    "mass_total": "0",
+    "mass_last_nip": "",
+    "mass_start_time": "0",
+    "mass_in_success": 0,
+    "mass_in_failed": 0,
+    "mass_out_success": 0,
+    "mass_out_failed": 0,
+    "mass_stop": "0",
+}
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_optional_float(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stringify_setting(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _coerce_telegram_id(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    if isinstance(value, dict) and "id" in value:
+        return _coerce_telegram_id(value["id"])
+    return None
+
+
+def _normalize_time_value(value: Any, fallback: str) -> str:
+    raw = str(value).strip() if value not in (None, "") else ""
+    if not raw or raw.lower() in {"none", "null", "default", "-"}:
+        return fallback
+    return raw if _is_valid_time_text(raw) else fallback
+
+
+def normalize_workdays(value: Any, default: str = DEFAULT_WORKDAYS) -> str:
+    if hasattr(value, "value"):
+        value = value.value
+    if value in (None, ""):
+        return default
+    normalized = (
+        str(value)
+        .strip()
+        .lower()
+        .replace("_", "-")
+        .replace(" ", "-")
+    )
+    return WORKDAY_ALIASES.get(normalized, default)
+
+
+def get_workday_label(value: Any) -> str:
+    key = normalize_workdays(value)
+    return WORKDAY_PRESETS.get(key, WORKDAY_PRESETS[DEFAULT_WORKDAYS])["label"]
+
+
+def get_workday_cron(value: Any) -> str:
+    key = normalize_workdays(value)
+    return WORKDAY_PRESETS.get(key, WORKDAY_PRESETS[DEFAULT_WORKDAYS])["cron"]
+
+
+def _is_valid_time_text(value: str) -> bool:
+    parts = value.split(":")
+    if len(parts) != 2:
+        return False
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return False
+    return 0 <= hour <= 23 and 0 <= minute <= 59
+
+
+def _resolve_auto_attendance_status(
+    *,
+    automation_enabled: bool,
+    is_active: bool,
+    has_password: bool,
+    cron_in: str,
+    cron_out: str,
+    latitude: Optional[float],
+    longitude: Optional[float],
+) -> tuple[bool, str]:
+    if not automation_enabled:
+        return False, "Otomasi global dimatikan."
+    if not is_active:
+        return False, "User dinonaktifkan."
+    if not has_password:
+        return False, "Password portal belum tersedia."
+    if not _is_valid_time_text(cron_in) or not _is_valid_time_text(cron_out):
+        return False, "Jadwal otomatis belum valid."
+    if latitude is None or longitude is None:
+        return False, "Koordinat belum lengkap."
+    return True, "Auto absen siap dijalankan."
+
+
+class SupabaseManager:
+    """
+    Unified Database Manager powered exclusively by Supabase (PostgreSQL).
+    Provides relational access, audit feeds, cache-backed reads, and enterprise
+    controls such as idempotency locks and dead-letter recording.
+    """
+
+    _cache_lock = threading.RLock()
+    _settings_cache: Optional[tuple[float, Dict[str, Any]]] = None
+    _user_cache: Dict[str, tuple[float, UserData]] = {}
+    _users_with_passwords_cache: Optional[tuple[float, List[UserData]]] = None
+    _user_summaries_cache: Optional[tuple[float, List[UserData]]] = None
+
+    def __init__(self) -> None:
+        pass
+
+    @staticmethod
+    def _now_monotonic() -> float:
+        return time.monotonic()
+
+    def _is_cache_valid(self, timestamp: float, ttl_seconds: int) -> bool:
+        return (self._now_monotonic() - timestamp) < ttl_seconds
+
+    def _invalidate_settings_cache(self) -> None:
+        with self._cache_lock:
+            self.__class__._settings_cache = None
+
+    def invalidate_all_caches(self) -> None:
+        """Forcibly clear all internal caches for real-time synchronization."""
+        with self._cache_lock:
+            self.__class__._settings_cache = None
+            self.__class__._user_cache.clear()
+            self.__class__._users_with_passwords_cache = None
+            self.__class__._user_summaries_cache = None
+
+    def _invalidate_user_cache(self, nip: Optional[str] = None) -> None:
+        with self._cache_lock:
+            if nip:
+                self.__class__._user_cache.pop(nip, None)
+            else:
+                self.__class__._user_cache.clear()
+            self.__class__._users_with_passwords_cache = None
+            self.__class__._user_summaries_cache = None
+
+    def _decrypt_password(self, raw_password: Optional[str]) -> Optional[str]:
+        if raw_password and raw_password.startswith("gAAAA"):
+            try:
+                return security_manager.decrypt_password(raw_password)
+            except Exception:
+                return raw_password
+        return raw_password
+
+    def _encrypt_password(self, raw_password: Optional[str]) -> Optional[str]:
+        if raw_password is None:
+            return None
+        password = str(raw_password).strip()
+        if not password:
+            return ""
+        if password.startswith("gAAAA"):
+            return password
+        return security_manager.encrypt_password(password)
+
+    def _resolve_upt_id(self, session: Any, upt_input: Any) -> Optional[str]:
+        if not upt_input:
+            return None
+        try:
+            return str(uuid.UUID(str(upt_input)))
+        except ValueError:
+            upt_rec = session.query(UPT).filter(UPT.nama_upt == str(upt_input)).first()
+            if upt_rec:
+                return str(upt_rec.id)
+            new_upt = UPT(nama_upt=str(upt_input))
+            session.add(new_upt)
+            session.flush()
+            return str(new_upt.id)
+
+    def _merge_settings(self, raw_values: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(DEFAULT_SETTINGS)
+        merged.update(raw_values)
+        merged["default_location"] = str(merged.get("default_location") or DEFAULT_SETTINGS["default_location"])
+        merged["default_latitude"] = _coerce_float(
+            merged.get("default_latitude"),
+            DEFAULT_SETTINGS["default_latitude"],
+        )
+        merged["default_longitude"] = _coerce_float(
+            merged.get("default_longitude"),
+            DEFAULT_SETTINGS["default_longitude"],
+        )
+        merged["timezone"] = str(merged.get("timezone") or DEFAULT_SETTINGS["timezone"])
+        merged["ocr_engine"] = str(merged.get("ocr_engine") or DEFAULT_SETTINGS["ocr_engine"])
+        merged["cron_in"] = str(merged.get("cron_in") or DEFAULT_SETTINGS["cron_in"])
+        merged["cron_out"] = str(merged.get("cron_out") or DEFAULT_SETTINGS["cron_out"])
+        merged["default_workdays"] = normalize_workdays(
+            merged.get("default_workdays"),
+            DEFAULT_WORKDAYS,
+        )
+        merged["automation_enabled"] = _coerce_bool(
+            merged.get("automation_enabled"),
+            bool(DEFAULT_SETTINGS["automation_enabled"]),
+        )
+        return merged
+
+    def _serialize_user(self, user: Any, db_settings: Optional[Dict[str, Any]] = None) -> UserData:
+        effective_settings = db_settings or self.get_settings()
+        upt = getattr(user, "upt", None)
+        personal_latitude = getattr(user, "personal_latitude", None)
+        personal_longitude = getattr(user, "personal_longitude", None)
+        raw_password = cast(Optional[str], getattr(user, "password", None))
+        decrypted_password = self._decrypt_password(raw_password)
+        default_latitude = _coerce_optional_float(effective_settings.get("default_latitude"))
+        default_longitude = _coerce_optional_float(effective_settings.get("default_longitude"))
+
+        if personal_latitude is not None and personal_longitude is not None:
+            latitude = float(personal_latitude)
+            longitude = float(personal_longitude)
+            location_source = "personal"
+            location_label = str(upt.nama_upt) if upt else "Lokasi Personal"
+        else:
+            latitude = default_latitude if default_latitude is not None else DEFAULT_LOCATION_LATITUDE
+            longitude = default_longitude if default_longitude is not None else DEFAULT_LOCATION_LONGITUDE
+            location_source = "default"
+            location_label = str(effective_settings.get("default_location") or DEFAULT_SETTINGS["default_location"])
+
+        raw_cron_in = getattr(user, "cron_in", None)
+        raw_cron_out = getattr(user, "cron_out", None)
+        raw_workdays = getattr(user, "workdays", None)
+        cron_in = _normalize_time_value(raw_cron_in, str(effective_settings["cron_in"]))
+        cron_out = _normalize_time_value(raw_cron_out, str(effective_settings["cron_out"]))
+        workdays = normalize_workdays(raw_workdays, str(effective_settings["default_workdays"]))
+        has_password = bool(decrypted_password)
+        is_active = bool(getattr(user, "is_active", True))
+        auto_attendance_active, auto_attendance_reason = _resolve_auto_attendance_status(
+            automation_enabled=bool(effective_settings.get("automation_enabled", True)),
+            is_active=is_active,
+            has_password=has_password,
+            cron_in=cron_in,
+            cron_out=cron_out,
+            latitude=latitude,
+            longitude=longitude,
+        )
+        return {
+            "nip": str(getattr(user, "nip")),
+            "nama": str(getattr(user, "nama")),
+            "nama_upt": str(upt.nama_upt) if upt else "Unknown",
+            "latitude": latitude,
+            "longitude": longitude,
+            "location_label": location_label,
+            "location_source": location_source,
+            "telegram_id": _coerce_telegram_id(getattr(user, "telegram_id", None)),
+            "password": decrypted_password,
+            "has_password": has_password,
+            "cron_in": cron_in,
+            "cron_out": cron_out,
+            "cron_in_source": "personal" if _is_valid_time_text(str(raw_cron_in).strip()) else "default",
+            "cron_out_source": "personal" if _is_valid_time_text(str(raw_cron_out).strip()) else "default",
+            "workdays": workdays,
+            "workdays_label": get_workday_label(workdays),
+            "workdays_source": "personal" if raw_workdays not in (None, "") else "default",
+            "is_admin": bool(getattr(user, "is_admin", False)),
+            "is_active": is_active,
+            "auto_attendance_active": auto_attendance_active,
+            "auto_attendance_reason": auto_attendance_reason,
+        }
+
+    # --- USER OPERATIONS (POSTGRES PRIMARY) ---
+
+    def get_user_by_nip(self, nip: str) -> Optional[UserData]:
+        return self.get_user_data(nip)
+
+    def get_user_data(self, nip: str) -> Optional[UserData]:
+        with self._cache_lock:
+            cached = self.__class__._user_cache.get(nip)
+            if cached and self._is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
+                return cast(UserData, dict(cached[1]))
+
+        db_settings = self.get_settings()
+        with db_manager.get_session() as session:
+            user = session.query(User).options(joinedload(User.upt)).filter(User.nip == nip).first()
+            if not user:
+                return None
+
+            serialized = self._serialize_user(user, db_settings=db_settings)
+            with self._cache_lock:
+                self.__class__._user_cache[nip] = (self._now_monotonic(), serialized)
+            return cast(UserData, dict(serialized))
+
+    def get_user_summaries(self) -> List[UserData]:
+        with self._cache_lock:
+            cached = self.__class__._user_summaries_cache
+            if cached and self._is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
+                return [cast(UserData, dict(item)) for item in cached[1]]
+
+        db_settings = self.get_settings()
+        with db_manager.get_session() as session:
+            users = (
+                session.query(User)
+                .options(joinedload(User.upt))
+                .order_by(User.nama.asc())
+                .all()
+            )
+            summaries = [self._serialize_user(user, db_settings=db_settings) for user in users]
+
+        with self._cache_lock:
+            self.__class__._user_summaries_cache = (self._now_monotonic(), summaries)
+        return [cast(UserData, dict(item)) for item in summaries]
+
+    def get_user_by_telegram_id(self, tid: int) -> Optional[UserData]:
+        with db_manager.get_session() as session:
+            user = session.query(User).filter(User.telegram_id == int(tid)).first()
+            if not user:
+                return None
+            return self.get_user_data(str(user.nip))
+
+    def get_upt_examples(self, limit: int = 2) -> str:
+        with db_manager.get_session() as session:
+            upts = session.query(UPT).limit(limit).all()
+            if upts:
+                return ", ".join([str(u.nama_upt) for u in upts])
+        return settings.UPT_EXAMPLE_FALLBACK
+
+    def get_all_upts(self) -> List[Dict[str, Any]]:
+        """Returns all UPTs as a list of dicts for keyboard generation."""
+        with db_manager.get_session() as session:
+            upts = session.query(UPT).order_by(UPT.nama_upt).all()
+            return [{"id": str(u.id), "nama_upt": str(u.nama_upt)} for u in upts]
+
+    def add_user(self, data: Dict[str, Any]) -> bool:
+        nip = data.get("nip")
+        if not nip:
+            return False
+
+        db_settings = self.get_settings()
+        with db_manager.get_session() as session:
+            actual_upt_id = self._resolve_upt_id(session, data.get("upt_id"))
+            encrypted_password = self._encrypt_password(data.get("password"))
+
+            existing_user = session.query(User).filter(User.nip == nip).first()
+            if existing_user:
+                # Protection: Don't allow a new telegram_id to overwrite an EXISTING different telegram_id
+                # unless the update is coming from an admin (where we might just be updating fields)
+                # or the NIP didn't have a telegram_id yet (e.g., added by admin manually).
+                new_tid = _coerce_telegram_id(data.get("telegram_id"))
+                if existing_user.telegram_id and new_tid and existing_user.telegram_id != new_tid:
+                    # NIP is already linked to someone else.
+                    return False
+
+                existing_user.nama = data.get("nama", existing_user.nama)
+                if encrypted_password is not None:
+                    existing_user.password = encrypted_password
+                if actual_upt_id:
+                    existing_user.upt_id = actual_upt_id
+                
+                if new_tid is not None:
+                    existing_user.telegram_id = new_tid
+                existing_user.role = data.get("role", existing_user.role)
+                if "cron_in" in data and data.get("cron_in"):
+                    existing_user.cron_in = str(data["cron_in"])
+                if "cron_out" in data and data.get("cron_out"):
+                    existing_user.cron_out = str(data["cron_out"])
+                if "is_active" in data:
+                    existing_user.is_active = bool(data["is_active"])
+                session.add(existing_user)
+            else:
+                session.add(User(
+                    id=data.get("id") or uuid.uuid4(),
+                    nip=nip,
+                    nama=data.get("nama", ""),
+                    password=encrypted_password or None,
+                    upt_id=actual_upt_id,
+                    telegram_id=_coerce_telegram_id(data.get("telegram_id")),
+                    role=data.get("role", "user"),
+                    is_admin=bool(data.get("is_admin", False)),
+                    is_active=bool(data.get("is_active", True)),
+                    cron_in=str(data["cron_in"]).strip() if data.get("cron_in") not in (None, "") else None,
+                    cron_out=str(data["cron_out"]).strip() if data.get("cron_out") not in (None, "") else None,
+                    workdays=normalize_workdays(data.get("workdays"), str(db_settings["default_workdays"]))
+                    if data.get("workdays") not in (None, "")
+                    else None,
+                ))
+
+        self._invalidate_user_cache(str(nip))
+        self.add_audit_log(
+            nip=str(nip),
+            action="registration",
+            status="success",
+            message=f"Personnel Registered/Updated: {data.get('nama')}",
+        )
+        return True
+
+    def update_user_settings(self, nip: str, settings_update: Dict[str, Any]) -> bool:
+        with db_manager.get_session() as session:
+            user = session.query(User).filter(User.nip == nip).first()
+            if not user:
+                return False
+
+            if "cron_in" in settings_update:
+                value = settings_update["cron_in"]
+                normalized = str(value).strip() if value not in (None, "") else ""
+                user.cron_in = normalized if normalized.lower() not in {"none", "null", "default", "-"} else None
+            if "cron_out" in settings_update:
+                value = settings_update["cron_out"]
+                normalized = str(value).strip() if value not in (None, "") else ""
+                user.cron_out = normalized if normalized.lower() not in {"none", "null", "default", "-"} else None
+            if "personal_latitude" in settings_update:
+                user.personal_latitude = _coerce_optional_float(settings_update["personal_latitude"])
+            if "personal_longitude" in settings_update:
+                user.personal_longitude = _coerce_optional_float(settings_update["personal_longitude"])
+            if "workdays" in settings_update:
+                value = settings_update["workdays"]
+                user.workdays = normalize_workdays(value) if value not in (None, "") else None
+            if "is_active" in settings_update:
+                user.is_active = bool(settings_update["is_active"])
+            if "nama" in settings_update:
+                user.nama = str(settings_update["nama"])
+            if "password" in settings_update:
+                encrypted_password = self._encrypt_password(settings_update["password"])
+                if encrypted_password is not None:
+                    user.password = encrypted_password
+
+            if "upt_id" in settings_update:
+                user.upt_id = self._resolve_upt_id(session, settings_update["upt_id"])
+
+            session.add(user)
+
+        self._invalidate_user_cache(nip)
+        self.add_audit_log(
+            nip=nip,
+            action="settings_update",
+            status="success",
+            message=f"Personnel Settings Updated: {settings_update}",
+        )
+        return True
+
+    def rename_user_nip(self, old_nip: str, new_nip: str) -> bool:
+        with db_manager.get_session() as session:
+            user = session.query(User).filter(User.nip == old_nip).first()
+            if not user:
+                return False
+            user.nip = str(new_nip)
+            session.add(user)
+
+        self._invalidate_user_cache()
+        self.add_audit_log(
+            nip=str(new_nip),
+            action="rename_nip",
+            status="success",
+            message=f"Personnel NIP renamed from {old_nip} to {new_nip}",
+        )
+        return True
+
+    def get_users_with_passwords(self) -> List[UserData]:
+        with self._cache_lock:
+            cached = self.__class__._users_with_passwords_cache
+            if cached and self._is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
+                return [cast(UserData, dict(item)) for item in cached[1]]
+
+        db_settings = self.get_settings()
+        with db_manager.get_session() as session:
+            users = (
+                session.query(User)
+                .options(joinedload(User.upt))
+                .filter(User.password != None, User.password != "", User.is_active == True)  # noqa: E711,E712
+                .order_by(User.nama.asc())
+                .all()
+            )
+            results = [self._serialize_user(user, db_settings=db_settings) for user in users]
+
+        with self._cache_lock:
+            self.__class__._users_with_passwords_cache = (self._now_monotonic(), results)
+        return [cast(UserData, dict(item)) for item in results]
+
+    def delete_user(self, nip: str) -> bool:
+        deleted = False
+        with db_manager.get_session() as session:
+            session.query(AuditLog).filter(AuditLog.nip == nip).delete()
+            session.query(UserSession).filter(UserSession.nip == nip).delete()
+            deleted = session.query(User).filter(User.nip == nip).delete() > 0
+
+        self._invalidate_user_cache(nip)
+        if deleted:
+            self.add_audit_log(
+                nip=nip,
+                action="delete_personnel",
+                status="success",
+                message="Personnel Data Definitively Deleted from Cluster.",
+            )
+        return deleted
+
+    # --- SESSION MANAGEMENT (POSTGRES BACKED) ---
+
+    def save_user_session(self, nip: str, session_data: Dict[str, Any]) -> None:
+        with db_manager.get_session() as session:
+            user = session.query(User).filter(User.nip == nip).first()
+            if not user:
+                print(f"Cannot save session: User {nip} not found in DB.")
+                return
+
+            existing = session.query(UserSession).filter(UserSession.user_id == user.id).first()
+            if existing:
+                existing.data = session_data
+                existing.nip = nip
+                existing.updated_at = now_storage()
+            else:
+                session.add(UserSession(
+                    user_id=user.id,
+                    nip=nip,
+                    data=session_data,
+                    updated_at=now_storage(),
+                ))
+            print(f"Session persisted to Supabase for {nip}.")
+
+    def get_user_session(self, nip: str) -> Optional[Dict[str, Any]]:
+        with db_manager.get_session() as session:
+            sess = session.query(UserSession).filter(UserSession.nip == nip).first()
+            if sess and hasattr(sess, "data"):
+                return dict(sess.data)
+            return None
+
+    def delete_user_session(self, nip: str) -> None:
+        with db_manager.get_session() as session:
+            session.query(UserSession).filter(UserSession.nip == nip).delete()
+
+    # --- AUDIT LOGS & TELEMETRY ---
+
+    def add_audit_log(
+        self,
+        nip: str,
+        action: str,
+        status: str,
+        message: str,
+        response_time: Optional[float] = None,
+    ) -> None:
+        with db_manager.get_session() as session:
+            user = session.query(User).filter(User.nip == nip).first()
+            user_id = user.id if user else None
+
+            session.add(AuditLog(
+                user_id=user_id,
+                nip=nip,
+                action=action,
+                status=status,
+                message=message,
+                response_time=response_time,
+            ))
+
+    def get_last_success_action(self, nip: str, action: str) -> tuple[Optional[datetime], Optional[str]]:
+        with db_manager.get_session() as session:
+            log = (
+                session.query(AuditLog)
+                .filter(
+                    AuditLog.nip == nip,
+                    AuditLog.action == action,
+                    AuditLog.status == "success",
+                )
+                .order_by(AuditLog.timestamp.desc())
+                .first()
+            )
+            if log:
+                return log.timestamp, log.message
+            return None, None
+
+    def get_last_success_actions(self, nip: str) -> Dict[str, Optional[datetime]]:
+        from sqlalchemy import cast, String
+        with db_manager.get_session() as session:
+            rows = (
+                session.query(
+                    cast(AuditLog.action, String).label("action_str"),
+                    func.max(AuditLog.timestamp).label("latest_timestamp"),
+                )
+                .filter(
+                    AuditLog.nip == nip,
+                    AuditLog.status.in_(["success", "ok"]),
+                    cast(AuditLog.action, String).in_(["in", "out", "checkin", "checkout"]),
+                )
+                .group_by(text("action_str"))
+                .all()
+            )
+
+            result: Dict[str, Optional[datetime]] = {"in": None, "out": None}
+            for action_str, latest_timestamp in rows:
+                action_str = str(action_str).lower()
+                if "." in action_str:
+                    action_str = action_str.split(".")[-1]
+                
+                if action_str in {"in", "checkin"}:
+                    if result["in"] is None or (latest_timestamp and (result["in"] is None or latest_timestamp > result["in"])):
+                        result["in"] = latest_timestamp
+                elif action_str in {"out", "checkout"}:
+                    if result["out"] is None or (latest_timestamp and (result["out"] is None or latest_timestamp > result["out"])):
+                        result["out"] = latest_timestamp
+            return result
+
+    def get_user_history(self, nip: str, limit: int = 10) -> List[AuditLogData]:
+        with db_manager.get_session() as session:
+            logs = (
+                session.query(AuditLog)
+                .filter(AuditLog.nip == nip)
+                .order_by(AuditLog.timestamp.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "nip": str(log.nip),
+                    "action": str(log.action),
+                    "status": str(log.status),
+                    "message": str(log.message),
+                    "response_time": log.response_time,
+                    "timestamp": log.timestamp,
+                }
+                for log in logs
+            ]
+
+    def get_system_metrics(self) -> Dict[str, Any]:
+        """Fetch high-level system metrics for telemetry."""
+        from sqlalchemy import func
+        from datetime import date
+        with db_manager.get_session() as session:
+            total_users = session.query(func.count(User.id)).filter(User.is_active == True).scalar()
+            total_with_pass = session.query(func.count(User.id)).filter(User.is_active == True, User.password != None).scalar()
+            success_today = session.query(func.count(AuditLog.id)).filter(
+                AuditLog.status == "success",
+                AuditLog.timestamp >= date.today()
+            ).scalar()
+            
+            return {
+                "active_personnel": total_users,
+                "managed_personnel": total_with_pass,
+                "success_today": success_today,
+                "db_provider": "Supabase (PostgreSQL)"
+            }
+
+    def get_global_audit_logs(self, limit: int = 20) -> List[AuditLogData]:
+        with db_manager.get_session() as session:
+            logs = session.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit).all()
+            return [
+                {
+                    "nip": str(log.nip),
+                    "action": str(log.action),
+                    "status": str(log.status),
+                    "message": str(log.message),
+                    "response_time": log.response_time,
+                    "timestamp": log.timestamp,
+                }
+                for log in logs
+            ]
+
+    def get_recent_audit_feed(
+        self,
+        limit: int = 200,
+        status: Optional[str] = None,
+        action: Optional[str] = None,
+        nip: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        with db_manager.get_session() as session:
+            query = (
+                session.query(AuditLog, User.nama)
+                .outerjoin(User, User.nip == AuditLog.nip)
+                .order_by(AuditLog.timestamp.desc())
+            )
+
+            if status:
+                query = query.filter(AuditLog.status.ilike(status))
+            if action:
+                query = query.filter(AuditLog.action == action)
+            if nip:
+                query = query.filter(AuditLog.nip == nip)
+
+            rows = query.limit(limit).all()
+
+        feed: List[Dict[str, Any]] = []
+        for log, user_name in rows:
+            local_ts = to_local(log.timestamp)
+            feed.append({
+                "nip": str(log.nip),
+                "nama": user_name or ("System" if str(log.nip).upper() == "SYSTEM" else "Unknown"),
+                "action": str(log.action),
+                "status": str(log.status).upper(),
+                "message": str(log.message),
+                "response_time": log.response_time,
+                "timestamp": format_formal_timestamp(local_ts),
+                "timestamp_raw": isoformat_local(local_ts),
+            })
+        return feed
+
+    def clear_audit_logs(self) -> int:
+        with db_manager.get_session() as session:
+            deleted = session.query(AuditLog).delete()
+        return int(deleted or 0)
+
+    def get_daily_stats(self) -> Dict[str, int]:
+        from sqlalchemy import cast, String
+        start_utc, end_utc = local_day_bounds()
+        with db_manager.get_session() as session:
+            rows = (
+                session.query(
+                    cast(AuditLog.action, String).label("action_str"),
+                    cast(AuditLog.status, String).label("status_str"),
+                    func.count(AuditLog.id).label("count"),
+                )
+                .filter(
+                    AuditLog.timestamp >= start_utc,
+                    AuditLog.timestamp < end_utc,
+                    cast(AuditLog.action, String).in_(["in", "out", "checkin", "checkout"]),
+                )
+                .group_by(text("action_str"), text("status_str"))
+                .all()
+            )
+
+        stats = {
+            "total_attempts": 0,
+            "in_success": 0,
+            "in_failed": 0,
+            "out_success": 0,
+            "out_failed": 0,
+        }
+        for action_str, status_str, count in rows:
+            normalized_action = str(action_str).lower()
+            if normalized_action == "checkin":
+                normalized_action = "in"
+            elif normalized_action == "checkout":
+                normalized_action = "out"
+                
+            normalized_status = str(status_str).lower()
+            if normalized_action not in {"in", "out"}:
+                continue
+            if normalized_status in {"success", "ok"}:
+                stats[f"{normalized_action}_success"] += int(count)
+                stats["total_attempts"] += int(count)
+            elif normalized_status not in {"skipped"}:
+                stats[f"{normalized_action}_failed"] += int(count)
+                stats["total_attempts"] += int(count)
+        return stats
+
+    def get_metrics_overview(self, hours: int = 24) -> Dict[str, Any]:
+        from sqlalchemy import cast, String
+        window_start = now_utc() - timedelta(hours=hours)
+        with db_manager.get_session() as session:
+            rows = (
+                session.query(
+                    cast(AuditLog.action, String).label("action_str"),
+                    cast(AuditLog.status, String).label("status_str"),
+                    func.count(AuditLog.id).label("count"),
+                    func.avg(AuditLog.response_time).label("avg_response_time"),
+                )
+                .filter(AuditLog.timestamp >= window_start)
+                .group_by(text("action_str"), text("status_str"))
+                .all()
+            )
+            try:
+                dead_letter_count = session.execute(
+                    text("SELECT COUNT(*) FROM public.attendance_dead_letters WHERE failed_at >= :window_start"),
+                    {"window_start": window_start},
+                ).scalar_one_or_none() or 0
+            except Exception:
+                dead_letter_count = 0
+
+        totals: Dict[str, int] = {"total": 0, "success": 0, "failed": 0, "in": 0, "out": 0}
+        avg_samples: List[float] = []
+        for action_str, status_str, count, avg_response_time in rows:
+            normalized_status = str(status_str).lower()
+            normalized_action = str(action_str).lower()
+            
+            totals["total"] += int(count)
+            if normalized_status in {"success", "ok"}:
+                totals["success"] += int(count)
+            else:
+                totals["failed"] += int(count)
+            
+            if normalized_action in {"in", "checkin"}:
+                totals["in"] += int(count)
+            if normalized_action in {"out", "checkout"}:
+                totals["out"] += int(count)
+            if avg_response_time is not None:
+                avg_samples.append(float(avg_response_time))
+
+        failure_rate = (totals["failed"] / totals["total"]) if totals["total"] else 0.0
+        alerts: List[Dict[str, Any]] = []
+        if failure_rate >= settings.ALERT_FAILURE_RATE_THRESHOLD:
+            alerts.append({
+                "level": "warning",
+                "code": "high_failure_rate",
+                "message": f"Failure rate {failure_rate:.1%} dalam {hours} jam terakhir melewati ambang.",
+            })
+        if int(dead_letter_count) > 0:
+            alerts.append({
+                "level": "warning",
+                "code": "dead_letters_present",
+                "message": f"Terdapat {dead_letter_count} job di dead-letter queue.",
+            })
+
+        return {
+            "window_hours": hours,
+            "generated_at": isoformat_local(),
+            "totals": totals,
+            "failure_rate": failure_rate,
+            "avg_response_time": (sum(avg_samples) / len(avg_samples)) if avg_samples else None,
+            "dead_letters": int(dead_letter_count),
+            "alerts": alerts,
+        }
+
+    def get_recent_dead_letters(self, limit: int = 10) -> List[Dict[str, Any]]:
+        with db_manager.get_session() as session:
+            rows = session.execute(
+                text(
+                    """
+                    SELECT request_key, nip, action, reason, attempts, last_error, failed_at
+                    FROM public.attendance_dead_letters
+                    ORDER BY failed_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            ).mappings().all()
+
+        results: List[Dict[str, Any]] = []
+        for row in rows:
+            failed_at_local = to_local(row["failed_at"])
+            results.append({
+                "request_key": str(row["request_key"]),
+                "nip": str(row["nip"]),
+                "action": str(row["action"]),
+                "reason": str(row["reason"]),
+                "attempts": int(row["attempts"]),
+                "last_error": row["last_error"],
+                "failed_at": format_formal_timestamp(failed_at_local),
+                "failed_at_raw": isoformat_local(failed_at_local),
+            })
+        return results
+
+    def has_successful_attendance_today(self, nip: str, action: str) -> bool:
+        start_utc, end_utc = local_day_bounds()
+        
+        # Normalize action to handle both 'in' and 'checkin'
+        action_variants = [action]
+        if action == "in":
+            action_variants.append("checkin")
+        elif action == "out":
+            action_variants.append("checkout")
+        elif action == "checkin":
+            action_variants.append("in")
+        elif action == "checkout":
+            action_variants.append("out")
+
+        with db_manager.get_session() as session:
+            from sqlalchemy import cast, String
+            row = (
+                session.query(AuditLog.id)
+                .filter(
+                    AuditLog.nip == nip,
+                    cast(AuditLog.action, String).in_(action_variants),
+                    AuditLog.status.in_(["success", "ok"]),
+                    AuditLog.timestamp >= start_utc,
+                    AuditLog.timestamp < end_utc,
+                )
+                .first()
+            )
+            return row is not None
+
+    def acquire_attendance_lock(self, nip: str, action: str, request_key: str, source: str) -> bool:
+        scope = str(local_date())
+        lock_key = f"{nip}:{action}:{scope}"
+        expires_at = now_utc() + timedelta(seconds=settings.IDEMPOTENCY_LOCK_TTL_SECONDS)
+        created_at = now_utc()
+        with db_manager.get_session() as session:
+            session.execute(text("DELETE FROM public.attendance_job_locks WHERE expires_at <= now()"))
+            row = session.execute(
+                text(
+                    """
+                    INSERT INTO public.attendance_job_locks
+                        (lock_key, request_key, nip, action, source, scope_date, created_at, expires_at)
+                    VALUES
+                        (:lock_key, :request_key, :nip, :action, :source, :scope_date, :created_at, :expires_at)
+                    ON CONFLICT (lock_key) DO NOTHING
+                    RETURNING lock_key
+                    """
+                ),
+                {
+                    "lock_key": lock_key,
+                    "request_key": request_key,
+                    "nip": nip,
+                    "action": action,
+                    "source": source,
+                    "scope_date": scope,
+                    "created_at": created_at,
+                    "expires_at": expires_at,
+                },
+            ).first()
+            return row is not None
+
+    def release_attendance_lock(self, request_key: str) -> None:
+        with db_manager.get_session() as session:
+            session.execute(
+                text("DELETE FROM public.attendance_job_locks WHERE request_key = :request_key"),
+                {"request_key": request_key},
+            )
+
+    def record_dead_letter(
+        self,
+        request_key: str,
+        nip: str,
+        action: str,
+        payload: Dict[str, Any],
+        reason: str,
+        attempts: int,
+        last_error: Optional[str] = None,
+    ) -> None:
+        with db_manager.get_session() as session:
+            session.execute(
+                text(
+                    """
+                    INSERT INTO public.attendance_dead_letters
+                        (request_key, nip, action, payload, reason, attempts, last_error, failed_at)
+                    VALUES
+                        (:request_key, :nip, :action, CAST(:payload AS jsonb), :reason, :attempts, :last_error, :failed_at)
+                    ON CONFLICT (request_key) DO UPDATE SET
+                        payload = EXCLUDED.payload,
+                        reason = EXCLUDED.reason,
+                        attempts = EXCLUDED.attempts,
+                        last_error = EXCLUDED.last_error,
+                        failed_at = EXCLUDED.failed_at
+                    """
+                ),
+                {
+                    "request_key": request_key,
+                    "nip": nip,
+                    "action": action,
+                    "payload": json.dumps(payload),
+                    "reason": reason,
+                    "attempts": attempts,
+                    "last_error": last_error,
+                    "failed_at": now_utc(),
+                },
+            )
+
+    # --- GLOBAL SETTINGS ---
+
+    def get_settings(self) -> Dict[str, Any]:
+        with self._cache_lock:
+            cached = self.__class__._settings_cache
+            if cached and self._is_cache_valid(cached[0], settings.SETTINGS_CACHE_TTL_SECONDS):
+                return dict(cached[1])
+
+        with db_manager.get_session() as session:
+            rows = session.query(GlobalSetting).all()
+            values = {row.key: row.value for row in rows}
+            merged = self._merge_settings(values)
+
+        with self._cache_lock:
+            self.__class__._settings_cache = (self._now_monotonic(), merged)
+        return dict(merged)
+
+    def set_setting(self, key: str, value: str) -> None:
+        with db_manager.get_session() as session:
+            session.merge(GlobalSetting(key=key, value=_stringify_setting(value)))
+        self._invalidate_settings_cache()
+
+    def update_global_settings(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        allowed_keys = {
+            "default_location",
+            "default_latitude",
+            "default_longitude",
+            "timezone",
+            "rule_in_before",
+            "rule_out_after",
+            "rule_mode",
+            "rule_work_hours",
+            "ocr_engine",
+            "automation_enabled",
+            "cron_in",
+            "cron_out",
+            "default_workdays",
+            "time_storage_version",
+        }
+        with db_manager.get_session() as session:
+            for key, value in payload.items():
+                if key not in allowed_keys:
+                    continue
+                session.merge(GlobalSetting(key=key, value=_stringify_setting(value)))
+        self._invalidate_settings_cache()
+        self.add_audit_log(
+            nip="SYSTEM",
+            action="settings_update",
+            status="ok",
+            message="Global settings updated via control plane.",
+        )
+        return self.get_settings()
+
+    def get_mass_status(self) -> Dict[str, Any]:
+        values = self.get_settings()
+        return {
+            "active": values.get("mass_active", "0"),
+            "action": values.get("mass_action", ""),
+            "pos": values.get("mass_pos", "0"),
+            "total": values.get("mass_total", "0"),
+            "last_nip": values.get("mass_last_nip", ""),
+            "start_time": values.get("mass_start_time", "0"),
+            "in_success": int(values.get("mass_in_success", 0)),
+            "in_failed": int(values.get("mass_in_failed", 0)),
+            "out_success": int(values.get("mass_out_success", 0)),
+            "out_failed": int(values.get("mass_out_failed", 0)),
+        }
+
+    def update_mass_status(self, data: Dict[str, Any]) -> None:
+        for key, value in data.items():
+            self.set_setting(f"mass_{key}", str(value))
+
+    def trigger_mass_stop(self) -> None:
+        self.set_setting("mass_stop", "1")
+
+    def clear_mass_stop(self) -> None:
+        self.set_setting("mass_stop", "0")
+
+    def is_mass_stop_requested(self) -> bool:
+        return self.get_settings().get("mass_stop") == "1"
+
+    def search_users(self, query: str) -> List[UserData]:
+        db_settings = self.get_settings()
+        with db_manager.get_session() as session:
+            users = (
+                session.query(User)
+                .options(joinedload(User.upt))
+                .filter((User.nama.ilike(f"%{query}%")) | (User.nip.ilike(f"%{query}%")))
+                .all()
+            )
+            return [self._serialize_user(user, db_settings=db_settings) for user in users]
+
+    def get_all_telegram_ids(self) -> List[int]:
+        with db_manager.get_session() as session:
+            users = session.query(User).filter(User.telegram_id != None).all()  # noqa: E711
+            return sorted({int(user.telegram_id) for user in users if user.telegram_id is not None})

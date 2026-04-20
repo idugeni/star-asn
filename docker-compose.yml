@@ -1,0 +1,84 @@
+x-build: &star-asn-build
+  context: .
+  dockerfile: Dockerfile
+  target: runtime
+
+x-runtime-env: &star-asn-runtime-env
+  PYTHONUNBUFFERED: "1"
+  STARTUP_MAX_ATTEMPTS: "6"
+  STARTUP_RETRY_DELAY_SECONDS: "5"
+
+x-service-defaults: &star-asn-service
+  build: *star-asn-build
+  image: star-asn:latest
+  env_file:
+    - .env
+  init: true
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  bootstrap:
+    <<: *star-asn-service
+    container_name: star-asn-bootstrap
+    environment:
+      <<: *star-asn-runtime-env
+    command: ["bootstrap"]
+    restart: "no"
+
+  api:
+    <<: *star-asn-service
+    container_name: star-asn-api
+    environment:
+      <<: *star-asn-runtime-env
+      INTERNAL_API_URL: http://api:8000
+      INTERNAL_API_HEALTHCHECK_URL: http://127.0.0.1:8000
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: ["api"]
+    restart: unless-stopped
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "star_attendance.service_runner", "check-api"]
+      start_period: 30s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker:
+    <<: *star-asn-service
+    container_name: star-asn-worker
+    environment:
+      <<: *star-asn-runtime-env
+      INTERNAL_API_URL: http://api:8000
+    command: ["worker"]
+    restart: unless-stopped
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+
+  bot:
+    <<: *star-asn-service
+    container_name: star-asn-bot
+    environment:
+      <<: *star-asn-runtime-env
+      INTERNAL_API_URL: http://api:8000
+    command: ["bot"]
+    restart: unless-stopped
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+
+networks:
+  default:
+    name: star-asn-network
