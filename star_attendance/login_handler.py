@@ -418,12 +418,23 @@ class LoginHandler:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
                     headless=settings.WAF_BROWSER_HEADLESS, 
-                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+                    args=[
+                        "--no-sandbox", 
+                        "--disable-setuid-sandbox", 
+                        "--disable-dev-shm-usage",
+                        "--disable-blink-features=AutomationControlled", # HIDE WEBDRIVER
+                    ]
                 )
-                context = await browser.new_context(user_agent=self.user_agent, viewport={"width": 1280, "height": 720})
+                context = await browser.new_context(
+                    user_agent=self.user_agent, 
+                    viewport={"width": 1280, "height": 720},
+                    ignore_https_errors=True
+                )
                 page = await context.new_page()
                 
-                await page.goto(f"{self.base_url}/authentication/login", wait_until="commit", timeout=60000)
+                # NAVIGATION: Use networkidle to ensure WAF scripts finish
+                log("INFO", f"event=waf_browser status=navigating url={self.base_url}")
+                await page.goto(f"{self.base_url}/authentication/login", wait_until="networkidle", timeout=60000)
                 
                 # --- Stage 1: WAF Bypass with Human Jitter ---
                 try:
