@@ -126,19 +126,26 @@ class LoginHandler:
                 except Exception:
                     continue
 
-        # Initialize OCR Engines (Singleton pattern - LAZY LOAD)
+        # Initialize OCR Engines (Singleton pattern - Ensure it exists)
         if LoginHandler._dddd is None:
-            pass  # Will be loaded on first captcha solve
-
+            # We don't block here, but we ensure it's ready for the property access
+            pass
+        
         self.captcha_mode = settings.CAPTCHA_MODE.lower()
         self.captcha_require_alpha = True  
         self.captcha_max_digits = 3  
 
+    _ocr_init_lock = threading.Lock()
+
     @property
     def ocr(self) -> Any:
         if LoginHandler._dddd is None:
-            log("INFO", "event=ocr_init status=start message='Initializing ddddocr engine (Lazy Load)'")
-            LoginHandler._dddd = ddddocr.DdddOcr(show_ad=False)
+            with LoginHandler._ocr_init_lock:
+                # Double check inside lock
+                if LoginHandler._dddd is None:
+                    log("INFO", "event=ocr_init status=start message='Initializing ddddocr engine (Singleton)'")
+                    LoginHandler._dddd = ddddocr.DdddOcr(show_ad=False)
+                    log("SUCCESS", "event=ocr_init status=complete")
         return LoginHandler._dddd
 
     @classmethod
