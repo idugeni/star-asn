@@ -132,7 +132,14 @@ def get_context_prefix():
 
 def print_sync(msg):
     with print_lock:
-        print(msg, flush=True)
+        try:
+            print(msg, flush=True)
+        except UnicodeEncodeError:
+            # Fallback for non-UTF8 consoles (e.g. Windows cmd/powershell with CP1252)
+            try:
+                print(str(msg).encode("ascii", "replace").decode("ascii"), flush=True)
+            except Exception:
+                pass
 
 
 def format_info_line(level, msg, scope="CORE"):
@@ -191,10 +198,10 @@ def info_with_header(header, msg, scope="CORE"):
 
 def format_user_info(name, nip, upt, location):
     return (
-        f" {Fore.WHITE}┌────────────────────────────────────────────────────────────┐{Style.RESET_ALL}\n"
-        f" {Fore.WHITE}│ {Fore.WHITE}Nama      : {Fore.GREEN}{name:<46}{Fore.WHITE} │{Style.RESET_ALL}\n"
-        f" {Fore.WHITE}│ {Fore.WHITE}NIP       : {Fore.GREEN}{nip:<46}{Fore.WHITE} │{Style.RESET_ALL}\n"
-        f" {Fore.WHITE}│ {Fore.WHITE}Kantor    : {Fore.MAGENTA}{upt:<46}{Fore.WHITE} │{Style.RESET_ALL}\n"
-        f" {Fore.WHITE}│ {Fore.WHITE}GPS       : {Fore.BLUE}{location:<46}{Fore.WHITE} │{Style.RESET_ALL}\n"
-        f" {Fore.WHITE}└────────────────────────────────────────────────────────────┘{Style.RESET_ALL}"
+        f" {Fore.WHITE} +------------------------------------------------------------+{Style.RESET_ALL}\n"
+        f" {Fore.WHITE} | {Fore.WHITE}Nama      : {Fore.GREEN}{name:<46}{Fore.WHITE} |{Style.RESET_ALL}\n"
+        f" {Fore.WHITE} | {Fore.WHITE}NIP       : {Fore.GREEN}{nip:<46}{Fore.WHITE} |{Style.RESET_ALL}\n"
+        f" {Fore.WHITE} | {Fore.WHITE}Kantor    : {Fore.MAGENTA}{upt:<46}{Fore.WHITE} |{Style.RESET_ALL}\n"
+        f" {Fore.WHITE} | {Fore.WHITE}GPS       : {Fore.BLUE}{location:<46}{Fore.WHITE} |{Style.RESET_ALL}\n"
+        f" {Fore.WHITE} +------------------------------------------------------------+{Style.RESET_ALL}"
     )
