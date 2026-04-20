@@ -807,113 +807,114 @@ class LoginHandler:
                         await browser.close()
                         return None
 
-
-                    # 2. Fast-Wait: Continue as soon as form is interactive
-                    await page.wait_for_selector('input[name="username"]', state="attached", timeout=45000)
-                    await page.wait_for_selector('input[name="password"]', state="attached", timeout=10000)
-
-                    # 2. If Username/Password provided, perform FULL LOGIN
+                    # 2. Login Sequence Interative Loop (up to 5 attempts for Captcha accuracy)
                     if username and password:
                         log("INFO", f"event=waf_browser status=authenticating user={username}")
+                        for login_attempt in range(1, 6):
+                            try:
+                                # 2.1 Fill Credentials with Human-like typing
+                                log("INFO", f"event=waf_browser status=filling_credentials attempt={login_attempt}")
+                                if status_callback:
+                                    await status_callback(f"👤 Mengisi kredensial (Percobaan {login_attempt}/5)...")
 
-                        # Use DOM-level setters so headless/container runs don't depend on field visibility timing.
-                        await page.locator('input[name="username"]').evaluate(
-                            "(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }",
-                            username,
-                        )
-                        await page.locator('input[name="password"]').evaluate(
-                            "(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }",
-                            password,
-                        )
+                                # Clear and Type Name
+                                await page.locator('input[name="username"]').fill("")
+                                await page.locator('input[name="username"]').type(username, delay=50)
+                                
+                                # Clear and Type Password
+                                await page.locator('input[name="password"]').fill("")
+                                await page.locator('input[name="password"]').type(password, delay=50)
 
-                        # Solve Captcha natively
-                        captcha_img = await page.query_selector('img[src*="captcha"]')
-                        if captcha_img:
-                            img_bytes = await captcha_img.screenshot()
-                            # Use our internal OCR solver
-                            ocr_res = await self._get_two_best_candidates(img_bytes, min_conf=0.2)
-                            if ocr_res:
+                                # 2.2 Solve Captcha
+                                captcha_img = await page.wait_for_selector('img[src*="captcha"]', timeout=10000)
+                                if not captcha_img:
+                                    log("ERROR", "event=waf_browser status=captcha_missing")
+                                    break
+
+                                img_bytes = await captcha_img.screenshot()
+                                ocr_res = await self._get_two_best_candidates(img_bytes, min_conf=0.2)
+                                if not ocr_res:
+                                    log("WARN", "event=waf_browser status=ocr_failed action=refreshing_captcha")
+                                    await page.click('img[src*="captcha"]')
+                                    await asyncio.sleep(1)
+                                    continue
+
                                 code = ocr_res[0][1]
                                 log("INFO", f"event=waf_browser status=solving_captcha code={code}")
                                 if status_callback:
                                     await status_callback(f"🧩 Memecahkan Captcha: <b>{code}</b>")
 
-                                await page.locator('input[name="kv-captcha"]').evaluate(
-                                    "(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }",
-                                    code,
-                                )
+                                await page.locator('input[name="kv-captcha"]').fill("")
+                                await page.locator('input[name="kv-captcha"]').type(code, delay=50)
 
-                                # --- STABILIZATION ---
-                                # Give the site a moment to process any background JS before we submit.
-                                await asyncio.sleep(1.5)
+                                # 2.3 Submit and Verify
+                                await asyncio.sleep(1)
+                                await page.locator('button[type="submit"]').click()
                                 
-                                # Perform the actual click
-                                await page.locator('button[type="submit"]').click(force=True)
-
-                                # Wait for site response (redirect or error message)
+                                # Wait for Navigation (Success) or Error Message (Redirect stays on /login)
                                 try:
-                                    await page.wait_for_load_state("networkidle", timeout=10000)
-                                except:
-                                    pass
-
-                                content = await page.content()
-                                if "dashboard" in page.url or "user-name-text" in content or "/home" in page.url:
-                                    log("SUCCESS", "event=waf_browser status=login_success")
-                                    await portal_circuit_breaker.record_success()
-
-                                    # 2.1 IF ACTION PROVIDED: Perform Attendance in Browser Session
-                                    if action:
-                                        log("INFO", f"event=waf_browser status=executing_attendance action={action}")
-                                        attendance_res = await self._perform_attendance_in_browser(
-                                            page, action, location
-                                        )
-                                        # Return a combined result
-                                        cookies_list = await context.cookies()
-                                        formatted_cookies = [
-                                            {
-                                                "name": c["name"],
-                                                "value": c["value"],
-                                                "domain": c["domain"],
-                                                "path": c["path"],
-                                            }
-                                            for c in cookies_list
-                                        ]
-                                        await browser.close()
-                                        return {
-                                            "status": "success",
-                                            "cookies": formatted_cookies,
-                                            "attendance_result": attendance_res,
-                                        }
+                                    # Wait for either dashboard redirect OR network idle
+                                    await page.wait_for_url("**/dashboard", timeout=10000)
+                                    log("SUCCESS", "event=waf_browser status=dashboard_reached")
+                                    break
+                                except Exception:
+                                    # Check if we are still on login page
+                                    if "authentication/login" in page.url:
+                                        log("WARN", "event=waf_browser status=login_failed action=retrying_captcha")
+                                        if status_callback:
+                                            await status_callback("❌ Login gagal (mungkin Captcha salah). Mengulang...")
+                                        # Click captcha to refresh for next attempt
+                                        await page.click('img[src*="captcha"]')
+                                        await asyncio.sleep(1.5)
+                                        continue
                                     else:
-                                        # When no action is passed, return ONLY the formatted cookies list
-                                        cookies_list = await context.cookies()
-                                        formatted_cookies = [
-                                            {"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]}
-                                            for c in cookies_list
-                                        ]
-                                        await browser.close()
-                                        return formatted_cookies
-                                else:
-                                    log(
-                                        "WARN",
-                                        "event=waf_browser status=login_pending message='Manual intervention might be needed'",
-                                    )
-                                    # We wait a bit more just in case
-                                    await page.wait_for_timeout(5000)
+                                        # Some other page? Success?
+                                        if "dashboard" in page.url or "/home" in page.url:
+                                            log("SUCCESS", "event=waf_browser status=login_success_alternative")
+                                            break
 
-                    # 3. Extract final cookies
-                    log("SUCCESS", "event=waf_browser status=extracting_cookies")
+                            except Exception as e:
+                                log("ERROR", f"event=waf_browser status=step_failed error='{e}'")
+                                await asyncio.sleep(1)
+
+                    # 3. Final Verification & Extraction
+                    content = await page.content()
+                    if "dashboard" in page.url or "user-name-text" in content or "/home" in page.url:
+                        log("SUCCESS", "event=waf_browser status=validated_login")
+                        await portal_circuit_breaker.record_success()
+
+                        # If Action is provided, perform attendance while browser is open
+                        if action:
+                            log("INFO", f"event=waf_browser status=executing_attendance action={action}")
+                            attendance_res = await self._perform_attendance_in_browser(page, action, location)
+                    else:
+                        log("ERROR", "event=waf_browser status=failed_at_login_finish")
+                        if status_callback:
+                            await status_callback("❌ Gagal mencapai Dashboard. Silakan cek kredensial.")
+                        await browser.close()
+                        return None
+
+                    # Extract all cookies
                     cookies_list = await context.cookies()
-
-                    # Convert to our TypedDict format
-                    formatted_cookies = []
+                    cookies_formatted = []
                     for c in cookies_list:
-                        formatted_cookies.append(
-                            {"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]}
-                        )
+                        cookies_formatted.append({"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]})
 
+                    # Persist to DB directly for later direct-POST usage
+                    if username:
+                        try:
+                            from star_attendance.runtime import get_store
+                            store = get_store()
+                            db_user = store.get_user_data(username)
+                            if db_user:
+                                cookies_dict = {c["name"]: c["value"] for c in cookies_list}
+                                store.save_user_session(db_user["id"], cookies_dict, nip=username)
+                                print(f"Session persisted to Supabase for {username}.")
+                        except Exception as ex:
+                            log("WARN", f"event=waf_browser status=persist_failed error={ex}")
+                    
                     await browser.close()
-                    return formatted_cookies
+                    return cookies_formatted
 
         except Exception as e:
             await portal_circuit_breaker.record_failure(f"browser_bridge_exception:{e}")
