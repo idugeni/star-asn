@@ -837,16 +837,27 @@ class LoginHandler:
                                 log("INFO", f"event=waf_browser status=solving_captcha code={code}")
                                 if status_callback:
                                     await status_callback(f"🧩 Memecahkan Captcha: <b>{code}</b>")
+
                                 await page.locator('input[name="kv-captcha"]').evaluate(
                                     "(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }",
                                     code,
                                 )
+
+                                # --- STABILIZATION ---
+                                # Give the site a moment to process any background JS before we submit.
+                                await asyncio.sleep(1.5)
+                                
+                                # Perform the actual click
                                 await page.locator('button[type="submit"]').click(force=True)
 
-                                # Wait for navigation or error
-                                await asyncio.sleep(3)
+                                # Wait for site response (redirect or error message)
+                                try:
+                                    await page.wait_for_load_state("networkidle", timeout=10000)
+                                except:
+                                    pass
 
-                                if "dashboard" in page.url or "user-name-text" in await page.content():
+                                content = await page.content()
+                                if "dashboard" in page.url or "user-name-text" in content or "/home" in page.url:
                                     log("SUCCESS", "event=waf_browser status=login_success")
                                     await portal_circuit_breaker.record_success()
 
