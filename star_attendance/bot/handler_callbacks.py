@@ -334,12 +334,31 @@ async def _trigger_single_action(
 
     options = Options(action, services.store)
 
-    # 3. Process in background and update UI on completion
+    # 3. Status Callback for real-time updates
+    async def status_callback(status_msg: str):
+        try:
+            # Reconstruct the processing message with current status
+            updated_text = (
+                f"⏳ <b>MEMPROSES ABSENSI {action.upper()}...</b>\n"
+                f"👤 <b>Target:</b> <code>{user['nama']}</code>\n"
+                f"<i>{status_msg}</i>"
+            )
+            await services.edit_message(sent_msg, updated_text, None)
+        except Exception:
+            pass
+
+    # 4. Process in background and update UI on completion
     async def run_and_update():
         try:
             # We use process_single_user directly for immediate result
             success, result_msg = await process_single_user(
-                user, options, 1, 1, is_mass=False, user_message_id=sent_msg.message_id
+                user,
+                options,
+                1,
+                1,
+                is_mass=False,
+                status_callback=status_callback,
+                user_message_id=sent_msg.message_id,
             )
 
             # The result_msg from process_single_user is already formatted for Telegram

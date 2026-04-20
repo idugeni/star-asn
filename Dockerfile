@@ -25,11 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
-
+COPY pyproject.toml ./
 RUN python -m venv /opt/venv
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
+    pip install .
 RUN --mount=type=cache,target=/root/.cache/ms-playwright \
     python -m playwright install chromium
 
@@ -70,7 +69,7 @@ RUN chown -R appuser:appuser /opt/venv /ms-playwright /app
 COPY --chown=appuser:appuser api ./api
 COPY --chown=appuser:appuser star_attendance ./star_attendance
 COPY --chown=appuser:appuser supabase ./supabase
-COPY --chown=appuser:appuser requirements.txt ./requirements.txt
+COPY --chown=appuser:appuser pyproject.toml ./pyproject.toml
 COPY --chown=appuser:appuser main.py ./main.py
 
 USER appuser

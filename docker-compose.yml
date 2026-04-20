@@ -28,7 +28,9 @@ services:
     environment:
       <<: *star-asn-runtime-env
     command: ["bootstrap"]
-    restart: "no"
+    deploy:
+      restart_policy:
+        condition: none
 
   api:
     <<: *star-asn-service
@@ -40,10 +42,14 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     command: ["api"]
-    restart: unless-stopped
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     depends_on:
-      bootstrap:
-        condition: service_completed_successfully
+      - bootstrap
     healthcheck:
       test: ["CMD", "python", "-m", "star_attendance.service_runner", "check-api"]
       start_period: 30s
@@ -58,12 +64,15 @@ services:
       <<: *star-asn-runtime-env
       INTERNAL_API_URL: http://api:8000
     command: ["worker"]
-    restart: unless-stopped
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-      api:
-        condition: service_healthy
+      - bootstrap
+      - api
 
   bot:
     <<: *star-asn-service
@@ -72,12 +81,15 @@ services:
       <<: *star-asn-runtime-env
       INTERNAL_API_URL: http://api:8000
     command: ["bot"]
-    restart: unless-stopped
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-      api:
-        condition: service_healthy
+      - bootstrap
+      - api
 
 networks:
   default:
