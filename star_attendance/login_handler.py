@@ -866,8 +866,18 @@ class LoginHandler:
                                         timeout=12000
                                     )
                                     log("SUCCESS", "event=waf_browser status=dashboard_reached_verified")
+                                    # Perform attendance directly if requested
+                                    if action:
+                                        log("INFO", f"event=waf_browser status=executing_attendance action={action}")
+                                        attendance_res = await self._perform_attendance_in_browser(page, action, location)
                                     break
-                                except Exception as e:
+                                except Exception:
+                                    # Take a diagnostic screenshot on the LAST attempt if it failed
+                                    if login_attempt == 5:
+                                        shot_path = f"/tmp/failed_login_{username}_{int(time.time())}.png"
+                                        await page.screenshot(path=shot_path)
+                                        log("ERROR", f"event=waf_browser status=diagnostic_screenshot path={shot_path}")
+                                    
                                     # Check if we are still on login page
                                     current_url = page.url
                                     if "authentication/login" in current_url:
@@ -878,7 +888,7 @@ class LoginHandler:
                                         # Click captcha to refresh for next attempt
                                         try:
                                             await page.click('img[src*="captcha"]', timeout=3000)
-                                            await asyncio.sleep(1.5)
+                                            await asyncio.sleep(2)
                                         except:
                                             pass
                                         continue
@@ -887,6 +897,9 @@ class LoginHandler:
                                         content = await page.content()
                                         if "dashboard" in current_url or "Statistik" in content:
                                             log("SUCCESS", "event=waf_browser status=login_success_detected_via_content")
+                                            # Perform attendance if needed
+                                            if action:
+                                                attendance_res = await self._perform_attendance_in_browser(page, action, location)
                                             break
                                         log("ERROR", f"event=waf_browser status=unknown_page url={current_url}")
                                         break
