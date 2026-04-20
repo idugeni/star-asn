@@ -1,0 +1,385 @@
+import html
+import os
+import queue
+import threading
+import psutil
+from collections.abc import Sequence
+from datetime import datetime
+from typing import Any
+
+import requests
+from star_attendance.core.config import settings
+from star_attendance.core.timeutils import format_formal_timestamp, format_precise_time
+
+def _as_datetime(value: Any) -> datetime | None:
+    return value if isinstance(value, datetime) else None
+
+
+def _escape_text(value: Any, default: str = "-") -> str:
+    raw = default if value in (None, "") else str(value)
+    return html.escape(raw, quote=False)
+
+
+def _code(value: Any, default: str = "-") -> str:
+    return f"<code>{_escape_text(value, default)}</code>"
+
+
+def _action_label(action: str, *, automated: bool = False) -> str:
+    normalized = str(action).lower()
+    if normalized == "in":
+        return "AUTO CHECK-IN" if automated else "CHECK-IN"
+    if normalized == "out":
+        return "AUTO CHECK-OUT" if automated else "CHECK-OUT"
+    return html.escape(str(action).upper(), quote=False)
+
+
+def _status_meta(status: str) -> tuple[str, str]:
+    normalized = str(status).lower()
+    if normalized in {"success", "ok"}:
+        return "✅", "BERHASIL"
+    if normalized in {"skipped", "already_recorded", "already-success"}:
+        return "ℹ️", "SUDAH TERCATAT"
+    if normalized in {"duplicate", "deduplicated"}:
+        return "⚠️", "PERMINTAAN DUPLIKAT"
+    return "❌", "GAGAL"
+
+
+def _follow_up_message(status: str) -> str:
+    normalized = str(status).lower()
+    if normalized in {"success", "ok"}:
+        return "Absensi otomatis berhasil diproses dan tercatat."
+    if normalized in {"skipped", "already_recorded", "already-success"}:
+        return "Absensi sudah pernah tercatat sebelumnya, jadi sistem tidak mengirim duplikasi."
+    if normalized in {"duplicate", "deduplicated"}:
+        return "Permintaan yang sama sedang diproses atau baru saja selesai."
+    return "Silakan cek bot dan lakukan verifikasi manual bila diperlukan."
+
+
+class TelegramNotifier:
+    def __init__(self) -> None:
+        self.token = settings.TELEGRAM_BOT_TOKEN
+        self.admin_id = str(settings.TELEGRAM_ADMIN_ID) if settings.TELEGRAM_ADMIN_ID else None
+        self.log_group_id = settings.TELEGRAM_LOG_GROUP_ID
+        self.is_active = bool(self.token)
+        self.session = requests.Session()
+        self._queue: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=1000)
+        self._worker = threading.Thread(target=self._dispatch_worker, daemon=True)
+        self._worker.start()
+
+    def _dispatch_worker(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                break
+            try:
+                self._send_now(item["message"], item["chat_ids"])
+            finally:
+                self._queue.task_done()
+
+    def _send_now(self, message: str, chat_ids: Sequence[str | int]) -> dict[int, int]:
+        """Sends message immediately and returns {chat_id: message_id}"""
+        if not self.is_active or not chat_ids:
+            return {}
+
+        url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+        results: dict[int, int] = {}
+        for chat_id in chat_ids:
+            payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+            try:
+                response = self.session.post(url, json=payload, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("ok"):
+                        results[int(chat_id)] = data["result"]["message_id"]
+                else:
+                    print(f"Notification Error for {chat_id}: {response.status_code} - {response.text}")
+            except Exception as exc:
+                print(f"Notification Error for {chat_id}: {exc}")
+        return results
+
+    def edit_message(self, chat_id: int | str, message_id: int, new_text: str) -> bool:
+        """Edits an existing message."""
+        if not self.is_active:
+            return False
+        url = f"https://api.telegram.org/bot{self.token}/editMessageText"
+        payload = {
+            "chat_id": str(chat_id),
+            "message_id": message_id,
+            "text": new_text,
+            "parse_mode": "HTML"
+        }
+        try:
+            response = self.session.post(url, json=payload, timeout=10)
+            return response.status_code == 200
+        except Exception as exc:
+            print(f"Edit Message Error: {exc}")
+            return False
+
+    def send_message_sync_get_id(self, message: str, to_admin: bool = True, to_group: bool = True) -> dict[int, int]:
+        """Sends message immediately and returns mapping of chat_id to message_id."""
+        return self._send_now(message, self._resolve_targets(to_admin, to_group))
+
+    def _resolve_targets(self, to_admin: bool, to_group: bool) -> list[str]:
+        targets: list[str] = []
+        if to_admin and self.admin_id:
+            targets.append(self.admin_id)
+        if to_group and self.log_group_id:
+            targets.append(self.log_group_id)
+        return targets
+
+    def _enqueue_message(self, message: str, chat_ids: Sequence[str | int]) -> bool:
+        if not self.is_active:
+            return False
+        try:
+            self._queue.put_nowait({
+                "message": message,
+                "chat_ids": list(chat_ids),
+            })
+            return True
+        except queue.Full:
+            return bool(self._send_now(message, chat_ids))
+
+    def send_message(self, message: str, to_admin: bool = True, to_group: bool = True) -> bool:
+        return self._enqueue_message(message, self._resolve_targets(to_admin, to_group))
+
+    def send_message_sync(self, message: str, to_admin: bool = True, to_group: bool = True) -> bool:
+        """Sends message immediately without queueing (blocking)."""
+        return bool(self._send_now(message, self._resolve_targets(to_admin, to_group)))
+
+    def send_direct_message(self, chat_id: int | str | None, message: str) -> bool:
+        if chat_id in (None, ""):
+            return False
+        return self._enqueue_message(message, [str(chat_id)])
+
+    def format_attendance_msg(
+        self,
+        nip: str,
+        name: str,
+        action: str,
+        status: str,
+        duration: float = 0,
+        *,
+        recorded_at: datetime | None = None,
+        telegram_id: int | str | None = None,
+        detail: str | None = None,
+        trace_id: str | None = None,
+        event_time: datetime | None = None,
+    ) -> str:
+        timestamp = format_formal_timestamp(event_time)
+        icon, status_text = _status_meta(status)
+        action_text = _action_label(action)
+        
+        # Determine Header Color Based on Status
+        header_color = "🟢" if status.lower() in {"success", "ok"} else "🔴"
+        if status.lower() in {"skipped", "duplicate"}:
+            header_color = "🟡"
+
+        lines = [
+            f"<b>{header_color} STAR-ASN TELEMETRY ALERT</b>",
+            "────────────────",
+            f"👤 <b>PERSONEL:</b> {_escape_text(name, 'Unknown')}",
+            f"🆔 <b>NIP:</b> {_code(nip)}",
+            f"⚙️ <b>AKSI:</b> {action_text}",
+            f"{icon} <b>STATUS:</b> {status_text}",
+            "────────────────",
+        ]
+        
+        if recorded_at is not None:
+            lines.append(f"⏰ <b>JAM ABSENSI:</b> <code>{format_precise_time(recorded_at)}</code>")
+        
+        lines.append(f"⏱ <b>DURASI:</b> <code>{duration:.2f}s</code>")
+        
+        if detail:
+            lines.append(f"💬 <b>INFO:</b> {_escape_text(detail)}")
+        
+        # System Telemetry Section
+        try:
+            cpu = psutil.cpu_percent()
+            ram = psutil.virtual_memory().percent
+            lines.append(f"📊 <b>SYSTEM:</b> <code>CPU {cpu}% | RAM {ram}%</code>")
+        except Exception:
+            pass
+
+        if trace_id:
+            lines.append(f"🧾 <b>REQUEST ID:</b> {_code(trace_id)}")
+            
+        lines.append("────────────────")
+        return "\n".join(lines)
+
+    def format_user_attendance_msg(
+        self,
+        nip: str,
+        name: str,
+        action: str,
+        status: str,
+        duration: float = 0,
+        *,
+        recorded_at: datetime | None = None,
+        detail: str | None = None,
+        event_time: datetime | None = None,
+    ) -> str:
+        timestamp = format_formal_timestamp(event_time)
+        icon, status_text = _status_meta(status)
+        action_text = _action_label(action, automated=True)
+        
+        # Friendly Tone for User Notif
+        greeting = "Halo"
+        hour = datetime.now().hour
+        if 0 <= hour < 5: greeting = "Selamat Dini Hari"
+        elif 5 <= hour < 11: greeting = "Selamat Pagi"
+        elif 11 <= hour < 15: greeting = "Selamat Siang"
+        elif 15 <= hour < 18: greeting = "Selamat Sore"
+        else: greeting = "Selamat Malam"
+
+        lines = [
+            f"<b>{icon} STATUS ABSENSI {action.upper()}</b>",
+            "────────────────",
+            f"👤 {greeting}, <b>{_escape_text(name, 'Unknown')}</b>",
+            f"Laporan kehadiran Anda telah diproses:",
+            "",
+            f"⚙️ <b>Aksi:</b> {action_text}",
+            f"{icon} <b>Status:</b> {status_text}",
+        ]
+        
+        if recorded_at is not None:
+            lines.append(f"⏰ <b>Waktu:</b> <code>{format_precise_time(recorded_at)}</code>")
+            
+        lines.append(f"⏱ <b>Proses:</b> <code>{duration:.2f} detik</code>")
+        
+        # Detail with a cleaner approach
+        info_text = detail or _follow_up_message(status)
+        lines.append(f"📝 <b>Keterangan:</b> <i>{_escape_text(info_text)}</i>")
+        
+        lines.extend([
+            "────────────────",
+        ])
+
+        # Optional: Add technical micro-telemetry for a premium feel
+        try:
+            cpu = psutil.cpu_percent()
+            ram = psutil.virtual_memory().percent
+            lines.append(f"<b>📊 SYSTEM:</b> <code>CPU {cpu}% | RAM {ram}%</code>")
+        except:
+            pass
+
+        lines.append("<i>Asisten Digital Star-ASN Enterprise</i>")
+        return "\n".join(lines)
+
+    def format_debug_log(self, data: dict[str, Any]) -> str:
+        status = data.get("status", "unknown")
+        icon, status_text = _status_meta(str(status))
+        recorded_at = _as_datetime(data.get("recorded_at"))
+        event_time = _as_datetime(data.get("event_time"))
+        action_text = data.get("action_text") or _action_label(str(data.get("action", "")))
+        detail = data.get("detail")
+        lines = [
+            f"<b>{icon} STAR-ASN LOGISTICS CLUSTER</b>",
+            "────────────────",
+            f"👤 <b>USER:</b> {_escape_text(data.get('name'), 'Unknown')}",
+            f"🆔 <b>NIP:</b> {_code(data.get('nip'))}",
+            f"🪪 <b>TELEGRAM ID:</b> {_code(data.get('telegram_id'))}",
+            f"⚙️ <b>ACTION:</b> {_escape_text(action_text, '-')}",
+            f"{icon} <b>STATUS:</b> {status_text}",
+        ]
+        if recorded_at is not None:
+            lines.append(f"⏰ <b>RECORDED AT:</b> <code>{format_precise_time(recorded_at)}</code>")
+        if detail:
+            lines.append(f"💬 <b>DETAIL:</b> {_escape_text(detail)}")
+        
+        # Include accumulated logs if available
+        logs = data.get("logs")
+        if logs and isinstance(logs, list):
+            lines.append("")
+            for log_entry in logs:
+                lines.append(f"<code>{_escape_text(log_entry)}</code>")
+        # Technical Indicators Table
+        lines.extend([
+            "",
+            "� <b>TECHNICAL PERFORMANCE:</b>",
+            f"  ├ 📡 IP: {_code(data.get('public_ip', 'N/A'))}",
+            f"  ├ 🔐 WAF: {_code(data.get('waf_status', 'ACTIVE'))}",
+            f"  ├ 🍪 SESSION: {_code(data.get('session_source', 'NEW'))}",
+            f"  ├ 🧩 CAPTCHA: {_code(data.get('captcha_code', 'N/A'))}",
+            f"  └ ⚡ DURATION: <code>{float(data.get('duration', 0) or 0):.2f}s</code>",
+            "",
+            "📱 <b>AGENT IDENTITY:</b>",
+            f"  └ UA: <code>{_escape_text(data.get('user_agent', 'N/A')[:50])}...</code>",
+            "",
+            f"🕒 <b>TIMESTAMP:</b> <code>{format_formal_timestamp(event_time)}</code>",
+            "────────────────",
+        ])
+        return "\n".join(lines)
+
+    async def debug(self, title: str, message: str, debug_data: dict[Any, Any] | None = None) -> None:
+        self.send_message(f"<b>{title}</b>\n{html.escape(message, quote=False)}", to_admin=True, to_group=True)
+
+    def notify_attendance(
+        self,
+        nip: str,
+        name: str,
+        action: str,
+        status: str,
+        duration: float = 0,
+        to_admin: bool = True,
+        to_group: bool = True,
+        to_user: bool = False,
+        user_chat_id: int | str | None = None,
+        user_message_id: int | None = None,
+        debug_data: dict[Any, Any] | None = None,
+    ) -> None:
+        payload = dict(debug_data or {})
+        payload.update({
+            "nip": nip,
+            "name": name,
+            "duration": duration,
+            "status": status,
+            "telegram_id": payload.get("telegram_id") or user_chat_id,
+        })
+        if "action_text" not in payload:
+            payload["action_text"] = _action_label(action)
+
+        recorded_at = _as_datetime(payload.get("recorded_at"))
+        event_time = _as_datetime(payload.get("event_time"))
+        detail = payload.get("detail")
+        trace_id = str(payload["request_key"]) if payload.get("request_key") not in (None, "") else None
+
+        user_message = self.format_user_attendance_msg(
+            nip,
+            name,
+            action,
+            status,
+            duration,
+            recorded_at=recorded_at,
+            detail=str(detail) if detail else None,
+            event_time=event_time,
+        )
+        admin_message = self.format_attendance_msg(
+            nip,
+            name,
+            action,
+            status,
+            duration,
+            recorded_at=recorded_at,
+            telegram_id=payload.get("telegram_id"),
+            detail=str(detail) if detail else None,
+            trace_id=trace_id,
+            event_time=event_time,
+        )
+
+        if to_group:
+            # Send the detailed debug log to the telemetry group
+            self.send_message(self.format_debug_log(payload), to_admin=False, to_group=True)
+            
+        if to_user:
+            if user_message_id and user_chat_id:
+                # If editing an existing message (Interactive), use the informative user message
+                self.edit_message(user_chat_id, user_message_id, user_message)
+            else:
+                self.send_direct_message(user_chat_id, user_message)
+        
+        # Admin direct notification only if it doesn't overlap with the user or group
+        if to_admin and not (to_user and str(user_chat_id) == str(self.admin_id)):
+            self.send_message(admin_message, to_admin=True, to_group=False)
+
+
+notifier = TelegramNotifier()

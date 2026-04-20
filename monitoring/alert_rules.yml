@@ -1,0 +1,161 @@
+groups:
+  - name: star-asn-alerts
+    interval: 30s
+    rules:
+      # API Alerts
+      - alert: APIHighErrorRate
+        expr: |
+          (sum(rate(http_requests_total{job="star-asn-api",status=~"5.."}[5m])) 
+          / sum(rate(http_requests_total{job="star-asn-api"}[5m]))) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API error rate high (>5%)"
+          description: "API error rate is {{ $value | humanizePercentage }}"
+
+      - alert: APIHighLatency
+        expr: histogram_quantile(0.95, http_request_duration_seconds{job="star-asn-api"}) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "API latency high (>2s)"
+          description: "P95 latency: {{ $value | humanizeDuration }}"
+
+      - alert: APIDown
+        expr: up{job="star-asn-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API service is DOWN"
+          description: "API has been unreachable for > 1 minute"
+
+      # Worker Alerts
+      - alert: WorkerHighErrorRate
+        expr: |
+          (sum(rate(job_failures_total{job="star-asn-worker"}[5m])) 
+          / sum(rate(job_total{job="star-asn-worker"}[5m]))) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Worker error rate high (>10%)"
+          description: "Worker error rate: {{ $value | humanizePercentage }}"
+
+      - alert: WorkerQueueBacklog
+        expr: queue_size{service="star-asn-worker"} > 1000
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Worker queue backlog growing"
+          description: "Queue size: {{ $value }} jobs"
+
+      # Bot Alerts
+      - alert: BotTelegramDisconnected
+        expr: up{job="star-asn-bot"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: bot
+        annotations:
+          summary: "Bot disconnected from Telegram"
+          description: "Bot service is unreachable for > 2 minutes"
+
+      - alert: BotHighMessageFailureRate
+        expr: |
+          (sum(rate(telegram_message_failures_total{job="star-asn-bot"}[5m]))
+          / sum(rate(telegram_messages_total{job="star-asn-bot"}[5m]))) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: bot
+        annotations:
+          summary: "Bot message failure rate high"
+          description: "Failure rate: {{ $value | humanizePercentage }}"
+
+      # System Alerts
+      - alert: ContainerMemoryUsageHigh
+        expr: |
+          (container_memory_usage_bytes / container_spec_memory_limit_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          type: system
+        annotations:
+          summary: "Container memory usage high (>90%)"
+          description: "Container: {{ $labels.container_name }} | Usage: {{ $value | humanizePercentage }}"
+
+      - alert: ContainerCPUUsageHigh
+        expr: |
+          rate(container_cpu_usage_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          type: system
+        annotations:
+          summary: "Container CPU usage high (>80%)"
+          description: "Container: {{ $labels.container_name }} | Usage: {{ $value | humanizePercentage }}"
+
+      - alert: DiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          type: system
+        annotations:
+          summary: "Disk space running low (<10%)"
+          description: "Available: {{ $value | humanizePercentage }}"
+
+      # Database Alerts
+      - alert: DatabaseConnectionPoolExhausted
+        expr: pg_stat_activity_count > 90
+        for: 5m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Connections: {{ $value }}/100"
+
+      - alert: DatabaseSlowQueries
+        expr: |
+          rate(pg_stat_statements_mean_time_milliseconds[5m]) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Slow database queries detected"
+          description: "Mean query time: {{ $value | humanizeDuration }}"
+
+      - alert: ReplicationLag
+        expr: pg_xlog_position_bytes - pg_last_xact_replay_location_bytes > 1000000
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Database replication lag high"
+          description: "Lag: {{ $value | humanize }} bytes"
+
+      # Uptime SLA Alerts
+      - alert: ServiceDowntime
+        expr: |
+          (1 - (count_over_time(up{job=~"star-asn.*"}[1h] offset 1h) 
+          / count_over_time(time()[1h] offset 1h))) > 0.01
+        for: 0m
+        labels:
+          severity: critical
+          type: sla
+        annotations:
+          summary: "Service uptime SLA breach (>99% target)"
+          description: "Downtime: {{ $value | humanizePercentage }}"
