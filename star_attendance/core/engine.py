@@ -4,7 +4,7 @@ import time
 import traceback
 from collections import OrderedDict
 from collections.abc import Callable, Coroutine, Mapping
-from typing import Any
+from typing import Any, cast
 
 from bs4 import BeautifulSoup
 from colorama import Fore, Style
@@ -24,7 +24,7 @@ from star_attendance.core.utils import (
     success,
     warning,
 )
-from star_attendance.login_handler import LoginHandler
+from star_attendance.login_handler import CookieData, LoginHandler
 from star_attendance.runtime import get_store
 
 

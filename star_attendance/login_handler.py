@@ -884,6 +884,12 @@ class LoginHandler:
                                         }
                                     else:
                                         # When no action is passed, return ONLY the formatted cookies list
+                                        cookies_list = await context.cookies()
+                                        formatted_cookies = [
+                                            {"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]}
+                                            for c in cookies_list
+                                        ]
+                                        await browser.close()
                                         return formatted_cookies
                                 else:
                                     log(

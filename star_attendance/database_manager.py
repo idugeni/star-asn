@@ -609,7 +609,7 @@ class SupabaseManager:
     def get_user_session(self, nip: str) -> dict[str, Any] | None:
         with db_manager.get_session() as session:
             sess = session.query(UserSession).filter(UserSession.nip == nip).first()
-            if sess and hasattr(sess, "data"):
+            if sess and sess.data is not None:
                 return dict(sess.data)
             return None
 
