@@ -792,10 +792,17 @@ class LoginHandler:
                     try:
                         # Detection: Look for the 'tkv' input which signals the login form is ready.
                         # Increased timeout to 60s for slow WAF handshakes.
-                        await page.wait_for_selector('input[name="tkv"]', timeout=60000)
+                        await page.wait_for_selector('input[name="tkv"]', timeout=45000)
                         log("SUCCESS", "event=waf_browser status=ready message='WAF cleared, login form detected'")
                     except Exception as e:
-                        log("ERROR", f"event=waf_browser status=timeout message='WAF did not clear or login form not found: {e}'")
+                        content = await page.content()
+                        if "Access Denied" in content or "403 Forbidden" in content:
+                            log("ERROR", "event=waf_browser status=denied message='Access Denied by WAF (IP Blocked or Fingerprint rejected)'")
+                            if status_callback:
+                                await status_callback("❌ Akses Ditolak oleh WAF. Mencoba rute lain...")
+                        else:
+                            log("ERROR", f"event=waf_browser status=timeout message='WAF did not clear: {e}'")
+                        
                         await portal_circuit_breaker.record_failure("browser_bridge_timeout")
                         await browser.close()
                         return None
