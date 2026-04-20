@@ -31,14 +31,16 @@ from star_attendance.runtime import get_store
 class AttendanceEngine:
     def __init__(
         self,
-        action="in",
         nip=None,
+        action="in",
+        location=None,
+        store=None,
         proxy=None,
         status_callback: Callable[[str], Coroutine[Any, Any, None]] | None = None,
     ):
-        self.action = action.lower()  # "in" or "out"
+        self.action = (action or "in").lower()  # "in" or "out"
         self.scope = self.action.upper()
-        self.store = get_store()
+        self.store = store or get_store()
         self.nip = nip
         self.proxy = proxy
         self.status_callback = status_callback
@@ -94,6 +96,21 @@ class AttendanceEngine:
             self.client.cookies.update(dict(cookies))
             return
         if isinstance(cookies, list):
+            # --- "MASTER OF MASTER" INJECTION ---
+            if LoginHandler._waf_cookies and isinstance(LoginHandler._waf_cookies, list):
+                for c in LoginHandler._waf_cookies:
+                    if not isinstance(c, dict):
+                        continue
+                    cookie = cast(CookieData, c)
+                    try:
+                        self.client.cookies.set(
+                            cookie["name"],
+                            cookie["value"],
+                            domain=cookie.get("domain", "star-asn.kemenimipas.go.id"),
+                            path=cookie.get("path", "/"),
+                        )
+                    except Exception:
+                        continue
             for cookie in cookies:
                 if not isinstance(cookie, Mapping):
                     continue
@@ -263,6 +280,24 @@ class AttendanceEngine:
                     return "CIRCUIT_OPEN"
 
                 if login_result and "cookies" in login_result:
+                    cookies = login_result["cookies"]
+                    if cookies and isinstance(cookies, list):
+                        self._session_source = "BRIDGE"
+                        waf_status = "BYPASSED"
+                        LoginHandler._waf_cookies = cast(list[CookieData], cookies)
+                        for c in LoginHandler._waf_cookies:
+                            if not isinstance(c, dict):
+                                continue
+                            cookie = cast(CookieData, c)
+                            try:
+                                self.client.cookies.set(
+                                    cookie["name"],
+                                    cookie["value"],
+                                    domain=cookie.get("domain", "star-asn.kemenimipas.go.id"),
+                                    path=cookie.get("path", "/"),
+                                )
+                            except Exception:
+                                continue
                     self._apply_cookies(login_result["cookies"])
                     self.last_response_time = login_result.get("response_time", 0.0)
 
@@ -532,6 +567,21 @@ class AttendanceEngine:
                         except json.JSONDecodeError:
                             # Check if HTML response indicates success
                             if "berhasil" in post_resp.text.lower():
+                                # 1. Inject Global WAF context if available
+                                if LoginHandler._waf_cookies and isinstance(LoginHandler._waf_cookies, list):
+                                    for c in LoginHandler._waf_cookies:
+                                        if not isinstance(c, dict):
+                                            continue
+                                        cookie = cast(CookieData, c)
+                                        try:
+                                            self.client.cookies.set(
+                                                cookie["name"],
+                                                cookie["value"],
+                                                domain=cookie.get("domain", "star-asn.kemenimipas.go.id"),
+                                                path=cookie.get("path", "/"),
+                                            )
+                                        except Exception:
+                                            continue
                                 success(f"ABSEN {self.action.upper()} BERHASIL (HTML Resp)!", scope=self.scope)
                                 self.store.add_audit_log(
                                     self.nip,

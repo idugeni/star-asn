@@ -109,15 +109,20 @@ class LoginHandler:
         )
 
         # --- "MASTER OF MASTER" INJECTION ---
-        if LoginHandler._waf_cookies:
+        if LoginHandler._waf_cookies and isinstance(LoginHandler._waf_cookies, list):
             for c in LoginHandler._waf_cookies:
+                if not isinstance(c, dict):
+                    continue
                 cookie = cast(CookieData, c)
-                self.client.cookies.set(
-                    cookie["name"],
-                    cookie["value"],
-                    domain=cookie.get("domain", "star-asn.kemenimipas.go.id"),
-                    path=cookie.get("path", "/"),
-                )
+                try:
+                    self.client.cookies.set(
+                        cookie["name"],
+                        cookie["value"],
+                        domain=cookie.get("domain", "star-asn.kemenimipas.go.id"),
+                        path=cookie.get("path", "/"),
+                    )
+                except Exception:
+                    continue
 
         # Initialize OCR Engines (Singleton pattern - LAZY LOAD)
         # Moved from __init__ to first-use to avoid blocking event loop on startup
@@ -522,16 +527,21 @@ class LoginHandler:
                         failure_reason = "waf_blocked"
                         log("WARN", f"event=tkv status=blocked_by_waf code={r_init.status_code}")
 
-                        # 0. Check if we already have shared WAF cookies
-                        if LoginHandler._waf_cookies:
+                        # 0. Check if we already have shared WAF context if available
+                        if LoginHandler._waf_cookies and isinstance(LoginHandler._waf_cookies, list):
                             for c in LoginHandler._waf_cookies:
+                                if not isinstance(c, dict):
+                                    continue
                                 cookie = cast(CookieData, c)
-                                self.client.cookies.set(
-                                    cookie["name"],
-                                    cookie["value"],
-                                    domain=cookie["domain"],
-                                    path=cookie.get("path", "/"),
-                                )
+                                try:
+                                    self.client.cookies.set(
+                                        cookie["name"],
+                                        cookie["value"],
+                                        domain=cookie.get("domain", "star-asn.kemenimipas.go.id"),
+                                        path=cookie.get("path", "/"),
+                                    )
+                                except Exception:
+                                    continue
                             # If we just applied cookies, retry this attempt immediately
                             await asyncio.sleep(1.0)
 
@@ -542,18 +552,23 @@ class LoginHandler:
                                 if not LoginHandler._waf_cookies:
                                     log("INFO", "event=waf_bridge status=start action=launch_browser")
                                     cookies = await self._solve_waf_challenge_via_browser()
-                                    if cookies:
+                                    if cookies and isinstance(cookies, list):
                                         self._session_source = "BRIDGE"
                                         waf_status = "BYPASSED"
                                         LoginHandler._waf_cookies = cast(list[CookieData], cookies)
                                         for c in LoginHandler._waf_cookies:
+                                            if not isinstance(c, dict):
+                                                continue
                                             cookie = cast(CookieData, c)
-                                            self.client.cookies.set(
-                                                cookie["name"],
-                                                cookie["value"],
-                                                domain=cookie["domain"],
-                                                path=cookie.get("path", "/"),
-                                            )
+                                            try:
+                                                self.client.cookies.set(
+                                                    cookie["name"],
+                                                    cookie["value"],
+                                                    domain=cookie.get("domain", "star-asn.kemenimipas.go.id"),
+                                                    path=cookie.get("path", "/"),
+                                                )
+                                            except Exception:
+                                                continue
                                         log("SUCCESS", "event=waf_bridge status=success action=cookies_synced")
                                     else:
                                         failure_reason = "browser_bridge_failed"
@@ -867,6 +882,9 @@ class LoginHandler:
                                             "cookies": formatted_cookies,
                                             "attendance_result": attendance_res,
                                         }
+                                    else:
+                                        # When no action is passed, return ONLY the formatted cookies list
+                                        return formatted_cookies
                                 else:
                                     log(
                                         "WARN",
