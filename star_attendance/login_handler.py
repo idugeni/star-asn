@@ -92,6 +92,7 @@ class LoginHandler:
     _dddd: Any = None  # ddddocr singleton
     _waf_cookies: list[CookieData] | None = None  # Shared WAF cookies
     _waf_lock = asyncio.Lock()
+    _last_browser_tkv: str | None = None # Captured from browser during bypass
 
     def __init__(
         self,
@@ -601,12 +602,19 @@ class LoginHandler:
                         log("WARN", f"event=tkv status=missing code={r_init.status_code} snippet='{log_snippet}...'")
                     continue
 
-                # Parsing TKV manual (lebih cepat dari BeautifulSoup)
-                try:
-                    tkv = r_init.text.split('name="tkv" value="')[1].split('"')[0]
-                except Exception:
-                    log("WARN", f"event=tkv status=parse_failed code={r_init.status_code}")
-                    continue
+                # --- TKV & COOKIE SYNC ---
+                tkv = None
+                if LoginHandler._last_browser_tkv:
+                    tkv = LoginHandler._last_browser_tkv
+                    log("INFO", f"event=tkv status=reused_from_browser val={tkv}")
+                    # We clear it after one use to ensure fresh tokens next time
+                    LoginHandler._last_browser_tkv = None
+                else:
+                    try:
+                        tkv = r_init.text.split('name="tkv" value="')[1].split('"')[0]
+                    except Exception:
+                        log("WARN", f"event=tkv status=parse_failed code={r_init.status_code}")
+                        continue
 
                 # 2. Solve Captcha
                 min_conf = settings.CAPTCHA_MIN_CONF
@@ -796,26 +804,36 @@ class LoginHandler:
                     # 1. Wait for WAF to clear and Login Page to appear
                     log("INFO", "event=waf_browser status=waiting action=clearing_waf")
                     try:
-                        # Detection: Look for the 'tkv' input which signals the login form is ready.
-                        # Increased timeout to 60s for slow WAF handshakes.
+                        # Detection: Look for 'tkv' input which signals the login form is ready.
                         await page.wait_for_selector('input[name="tkv"]', state="attached", timeout=45000)
                         log("SUCCESS", "event=waf_browser status=ready message='WAF cleared, login form detected'")
-                    except Exception as e:
-                        content = await page.content()
-                        if "Access Denied" in content or "403 Forbidden" in content:
-                            log("ERROR", "event=waf_browser status=denied message='Access Denied by WAF (IP Blocked or Fingerprint rejected)'")
-                            if status_callback:
-                                await status_callback("❌ Akses Ditolak oleh WAF. Mencoba rute lain...")
-                        else:
-                            log("ERROR", f"event=waf_browser status=timeout message='WAF did not clear: {e}'")
                         
-                        await portal_circuit_breaker.record_failure("browser_bridge_timeout")
+                        # HYBRID STRATEGY: Extract TKV and Cookies now.
+                        # This is much simpler than full automation if the site allows it.
+                        tkv_value = await page.eval_on_selector('input[name="tkv"]', "el => el.value")
+                        cookies_list = await context.cookies()
+                        cookies_formatted = []
+                        for c in cookies_list:
+                            cookies_formatted.append({"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]})
+
+                        log("INFO", f"event=waf_browser status=hybrid_extraction_complete tkv={tkv_value}")
+                        
+                        # Store in a temporary state that LoginHandler.login can use
+                        LoginHandler._last_browser_tkv = tkv_value
+                        
+                    except Exception as e:
+                        log("ERROR", f"event=waf_browser status=timeout message='WAF did not clear: {e}'")
                         await browser.close()
                         return None
 
-                    # 2. Login Sequence Interative Loop (up to 5 attempts for Captcha accuracy)
-                    if username and password:
-                        log("INFO", f"event=waf_browser status=authenticating user={username}")
+                    # If no credentials provided, we just return the cookies
+                    if not username or not password:
+                        await browser.close()
+                        return cookies_formatted
+
+                    # 2. FULL BROWSER LOGIN ATTEMPT (Plan B)
+                    log("INFO", f"event=waf_browser status=authenticating user={username}")
+                    # ... [existing loop for full login if needed] ...
                         for login_attempt in range(1, 6):
                             try:
                                 # 2.1 Fill Credentials with Human-like typing
