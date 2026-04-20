@@ -855,29 +855,41 @@ class LoginHandler:
 
                                 # 2.3 Submit and Verify
                                 await asyncio.sleep(1)
-                                await page.locator('button[type="submit"]').click()
+                                log("INFO", f"event=waf_browser status=submitting attempt={login_attempt}")
+                                await page.locator('button[type="submit"]').click(force=True)
                                 
-                                # Wait for Navigation (Success) or Error Message (Redirect stays on /login)
+                                # Wait for Navigation (Success) or Error Message
                                 try:
-                                    # Wait for either dashboard redirect OR network idle
-                                    await page.wait_for_url("**/dashboard", timeout=10000)
-                                    log("SUCCESS", "event=waf_browser status=dashboard_reached")
+                                    # Wait for either dashboard redirect OR specific dashboard elements
+                                    await page.wait_for_function(
+                                        "() => window.location.href.includes('dashboard') || document.body.innerText.includes('Dashboard') || document.body.innerText.includes('Statistik')",
+                                        timeout=12000
+                                    )
+                                    log("SUCCESS", "event=waf_browser status=dashboard_reached_verified")
                                     break
-                                except Exception:
+                                except Exception as e:
                                     # Check if we are still on login page
-                                    if "authentication/login" in page.url:
-                                        log("WARN", "event=waf_browser status=login_failed action=retrying_captcha")
+                                    current_url = page.url
+                                    if "authentication/login" in current_url:
+                                        log("WARN", f"event=waf_browser status=login_failed attempt={login_attempt} action=retrying")
                                         if status_callback:
-                                            await status_callback("❌ Login gagal (mungkin Captcha salah). Mengulang...")
+                                            await status_callback(f"❌ Percobaan {login_attempt} gagal. Mencoba lagi...")
+                                        
                                         # Click captcha to refresh for next attempt
-                                        await page.click('img[src*="captcha"]')
-                                        await asyncio.sleep(1.5)
+                                        try:
+                                            await page.click('img[src*="captcha"]', timeout=3000)
+                                            await asyncio.sleep(1.5)
+                                        except:
+                                            pass
                                         continue
                                     else:
-                                        # Some other page? Success?
-                                        if "dashboard" in page.url or "/home" in page.url:
-                                            log("SUCCESS", "event=waf_browser status=login_success_alternative")
+                                        # It might have succeeded but wait_for_function timed out
+                                        content = await page.content()
+                                        if "dashboard" in current_url or "Statistik" in content:
+                                            log("SUCCESS", "event=waf_browser status=login_success_detected_via_content")
                                             break
+                                        log("ERROR", f"event=waf_browser status=unknown_page url={current_url}")
+                                        break
 
                             except Exception as e:
                                 log("ERROR", f"event=waf_browser status=step_failed error='{e}'")
