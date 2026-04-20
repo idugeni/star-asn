@@ -551,7 +551,13 @@ class LoginHandler:
                                 # Double check after lock
                                 if not LoginHandler._waf_cookies:
                                     log("INFO", "event=waf_bridge status=start action=launch_browser")
-                                    cookies = await self._solve_waf_challenge_via_browser(status_callback=status_callback)
+                                    bridge_res = await self._solve_waf_challenge_via_browser(status_callback=status_callback)
+                                    cookies = None
+                                    if isinstance(bridge_res, dict):
+                                        cookies = bridge_res.get("cookies")
+                                    elif isinstance(bridge_res, list):
+                                        cookies = bridge_res
+
                                     if cookies and isinstance(cookies, list):
                                         self._session_source = "BRIDGE"
                                         waf_status = "BYPASSED"
@@ -900,7 +906,7 @@ class LoginHandler:
                     for c in cookies_list:
                         cookies_formatted.append({"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]})
 
-                    # Persist to DB directly for later direct-POST usage
+                    # Persist to DB directly
                     if username:
                         try:
                             from star_attendance.runtime import get_store
@@ -909,12 +915,16 @@ class LoginHandler:
                             if db_user:
                                 cookies_dict = {c["name"]: c["value"] for c in cookies_list}
                                 store.save_user_session(db_user["id"], cookies_dict, nip=username)
-                                print(f"Session persisted to Supabase for {username}.")
-                        except Exception as ex:
-                            log("WARN", f"event=waf_browser status=persist_failed error={ex}")
+                        except Exception:
+                            pass
                     
                     await browser.close()
-                    return cookies_formatted
+                    # Return a structured result including the attendance status
+                    return {
+                        "status": "success",
+                        "cookies": cookies_formatted,
+                        "attendance_result": attendance_res if 'attendance_res' in locals() else None
+                    }
 
         except Exception as e:
             await portal_circuit_breaker.record_failure(f"browser_bridge_exception:{e}")
