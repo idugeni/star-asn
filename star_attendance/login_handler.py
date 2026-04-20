@@ -1,21 +1,24 @@
-from curl_cffi.requests import AsyncSession  # type: ignore
-import cv2
-import numpy as np
 import asyncio
-import warnings
 import threading
 import time
-import random
-from datetime import datetime
-from typing import TypedDict, Optional, List, Any, cast, Callable, Coroutine
-from colorama import Fore, Style, init
+import warnings
+from collections.abc import Callable, Coroutine
 from contextvars import ContextVar
+from datetime import datetime
+from typing import Any, TypedDict, cast
+
+import cv2
+
+# DDDDOCR is our primary engine
+import ddddocr  # type: ignore
+import numpy as np
+from colorama import Fore, Style, init
+from curl_cffi.requests import AsyncSession  # type: ignore
+
 from star_attendance.core.config import settings
 from star_attendance.core.resilience import browser_bridge_semaphore, portal_circuit_breaker
 from star_attendance.core.timeutils import format_log_timestamp
 
-# DDDDOCR is our primary engine
-import ddddocr  # type: ignore
 HAS_DDDDOCR = True
 
 # Setup awal
@@ -26,11 +29,13 @@ print_lock = threading.Lock()
 _auth_context: ContextVar[str] = ContextVar("auth_context", default="")
 LOG_SCOPE = "AUTH"
 
+
 class CookieData(TypedDict):
     name: str
     value: str
     domain: str
     path: str
+
 
 # --- HELPER FUNCTIONS ---
 
@@ -57,65 +62,83 @@ def log(level: str, msg: str) -> None:
     color = colors.get(level, Fore.WHITE)
     with print_lock:
         print(
-            f"{Fore.CYAN}[{get_timestamp()}] {color}[{level}] {Fore.MAGENTA}[{LOG_SCOPE}] {Style.RESET_ALL}{get_context_prefix()}{msg}", flush=True)
+            f"{Fore.CYAN}[{get_timestamp()}] {color}[{level}] {Fore.MAGENTA}[{LOG_SCOPE}] {Style.RESET_ALL}{get_context_prefix()}{msg}",
+            flush=True,
+        )
 
 
 class LoginHandler:
-    _dddd: Any = None   # ddddocr singleton
-    _waf_cookies: Optional[List[CookieData]] = None  # Shared WAF cookies
+    _dddd: Any = None  # ddddocr singleton
+    _waf_cookies: list[CookieData] | None = None  # Shared WAF cookies
     _waf_lock = asyncio.Lock()
 
-    def __init__(self, base_url: str = "https://star-asn.kemenimipas.go.id", user_agent: Optional[str] = None, proxy: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        base_url: str = "https://star-asn.kemenimipas.go.id",
+        user_agent: str | None = None,
+        proxy: str | None = None,
+    ) -> None:
         self.base_url = base_url
         # Default Master Identity (Chrome 147)
-        self.user_agent = user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+        self.user_agent = (
+            user_agent
+            or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+        )
         self.proxy = proxy
 
         self.client: Any = AsyncSession(impersonate="chrome120", verify=False, timeout=30, proxy=self.proxy)
-        self.client.headers.update({
-            "User-Agent": self.user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Cache-Control": "no-cache",
-            "DNT": "1",
-            "Pragma": "no-cache",
-            "Priority": "u=0, i",
-            "Sec-Ch-Ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1"
-        })
+        self.client.headers.update(
+            {
+                "User-Agent": self.user_agent,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                "Accept-Encoding": "gzip, deflate, br, zstd",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "no-cache",
+                "DNT": "1",
+                "Pragma": "no-cache",
+                "Priority": "u=0, i",
+                "Sec-Ch-Ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+                "Sec-Ch-Ua-Mobile": "?0",
+                "Sec-Ch-Ua-Platform": '"Windows"',
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "Upgrade-Insecure-Requests": "1",
+            }
+        )
 
         # --- "MASTER OF MASTER" INJECTION ---
         if LoginHandler._waf_cookies:
             for c in LoginHandler._waf_cookies:
                 cookie = cast(CookieData, c)
                 self.client.cookies.set(
-                    cookie['name'], 
-                    cookie['value'],
-                    domain=cookie.get('domain', 'star-asn.kemenimipas.go.id'), 
-                    path=cookie.get('path', '/')
+                    cookie["name"],
+                    cookie["value"],
+                    domain=cookie.get("domain", "star-asn.kemenimipas.go.id"),
+                    path=cookie.get("path", "/"),
                 )
 
-        # Initialize OCR Engines (Singleton pattern)
+        # Initialize OCR Engines (Singleton pattern - LAZY LOAD)
+        # Moved from __init__ to first-use to avoid blocking event loop on startup
         if LoginHandler._dddd is None:
-            log("INFO", "event=ocr_load engine=ddddocr status=start")
-            LoginHandler._dddd = ddddocr.DdddOcr(show_ad=False)
-        self.ocr = LoginHandler._dddd
+            pass  # Will be loaded on first captcha solve
 
         self.captcha_mode = settings.CAPTCHA_MODE.lower()
-        self.captcha_require_alpha = True # Hardcoded or add to settings if needed
-        self.captcha_max_digits = 3 # Hardcoded or add to settings if needed
+        self.captcha_require_alpha = True  # Hardcoded or add to settings if needed
+        self.captcha_max_digits = 3  # Hardcoded or add to settings if needed
+
+    @property
+    def ocr(self) -> Any:
+        if LoginHandler._dddd is None:
+            log("INFO", "event=ocr_init status=start message='Initializing ddddocr engine (Lazy Load)'")
+            LoginHandler._dddd = ddddocr.DdddOcr(show_ad=False)
+        return LoginHandler._dddd
 
     @classmethod
     async def prime_waf_globally(cls, base_url: str = "https://star-asn.kemenimipas.go.id"):
         """
-        [PROACTIVE BYPASS] - The "Master Identity" solves the challenge once 
+        [PROACTIVE BYPASS] - The "Master Identity" solves the challenge once
         to open the gate for all 1000 workers simultaneously.
         """
         async with cls._waf_lock:
@@ -123,13 +146,13 @@ class LoginHandler:
             if cls._waf_cookies:
                 log("INFO", "event=waf_priming status=skipped reason=already_primed")
                 return True
-                
+
             log("INFO", "event=waf_priming status=start action=launching_master_identity")
             # Create a temporary handler just for priming
             temp_handler = LoginHandler(base_url)
             cookies = await temp_handler._solve_waf_challenge_via_browser()
             if cookies:
-                cls._waf_cookies = cast(List[CookieData], cookies)
+                cls._waf_cookies = cast(list[CookieData], cookies)
                 log("SUCCESS", "event=waf_priming status=complete action=master_gate_opened")
                 return True
             log("ERROR", "event=waf_priming status=failed message='Master Identity could not open the gate'")
@@ -248,7 +271,7 @@ class LoginHandler:
             ranges = [
                 (np.array([28, 35, 35]), np.array([100, 255, 255])),
                 (np.array([35, 50, 50]), np.array([95, 255, 255])),
-                (np.array([40, 60, 50]), np.array([85, 255, 255]))
+                (np.array([40, 60, 50]), np.array([85, 255, 255])),
             ]
             masks = [cv2.inRange(hsv, lower, upper) for lower, upper in ranges]
             mask = cv2.bitwise_or(masks[0], masks[1])
@@ -296,7 +319,7 @@ class LoginHandler:
                 (np.array([28, 35, 35]), np.array([100, 255, 255])),
                 (np.array([35, 50, 50]), np.array([95, 255, 255])),
                 (np.array([40, 60, 50]), np.array([85, 255, 255])),
-                (np.array([45, 70, 50]), np.array([80, 255, 255]))
+                (np.array([45, 70, 50]), np.array([80, 255, 255])),
             ]
             variants = []
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
@@ -309,7 +332,8 @@ class LoginHandler:
                     green = self._enhance_gray(green)
                     blurred = cv2.GaussianBlur(green, (3, 3), 0)
                     thresh = cv2.adaptiveThreshold(
-                        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 13, 2)
+                        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 13, 2
+                    )
                     thresh = 255 - thresh
                     thresh = cv2.copyMakeBorder(thresh, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
                     variants.append(thresh)
@@ -381,7 +405,7 @@ class LoginHandler:
                 # Fallback: Try minimal preprocessing
                 variant = self.preprocess_image(image_bytes)
                 if variant is not None:
-                    _, encoded_img = cv2.imencode('.png', variant)
+                    _, encoded_img = cv2.imencode(".png", variant)
                     res2 = self.ocr.classification(encoded_img.tobytes())
                     res2 = str(res2).upper()
                     if self._is_valid_code(res2):
@@ -392,7 +416,7 @@ class LoginHandler:
         except Exception as e:
             return {"prediction": None, "confidence": None, "error": f"exception:{e}"}
 
-    _public_ip_cache: Optional[str] = None
+    _public_ip_cache: str | None = None
     _public_ip_expiry: float = 0.0
 
     async def get_public_ip(self) -> str:
@@ -408,7 +432,7 @@ class LoginHandler:
                     resp = await self.client.get(url, timeout=3)
                     if resp.status_code == 200:
                         LoginHandler._public_ip_cache = resp.text.strip()
-                        LoginHandler._public_ip_expiry = now + 300 # 5 minutes cache
+                        LoginHandler._public_ip_expiry = now + 300  # 5 minutes cache
                         return LoginHandler._public_ip_cache
                 except Exception:
                     continue
@@ -416,11 +440,18 @@ class LoginHandler:
         except Exception:
             return LoginHandler._public_ip_cache or "ERROR"
 
-    async def login(self, username, password, action: Optional[str] = None, location: Optional[str] = None, status_callback: Optional[Callable[[str], Coroutine[Any, Any, None]]] = None):
+    async def login(
+        self,
+        username,
+        password,
+        action: str | None = None,
+        location: str | None = None,
+        status_callback: Callable[[str], Coroutine[Any, Any, None]] | None = None,
+    ):
         login_url = f"{self.base_url}/authentication/login"
         set_context(username)
         max_attempts = settings.CAPTCHA_ATTEMPTS
-        failure_reason: Optional[str] = None
+        failure_reason: str | None = None
         consecutive_solve_failures = 0
 
         if status_callback:
@@ -435,50 +466,59 @@ class LoginHandler:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                # 0. WAF Slow Handshake: Optimized Jitter
-                if attempt == 1:
-                    log("INFO", f"event=waf_priming status=stage1 action=warmup jitter={random.uniform(0.1, 0.3):.1f}s")
+                # 0. WAF Slow Handshake: Optimized for discovered 6.5s door opening time
+                if attempt == 1 and not LoginHandler._waf_cookies:
+                    log("INFO", "event=waf_priming status=stage1 action=warmup jitter=3.5s")
                     await self.client.get(f"{self.base_url}/", headers={"Sec-Fetch-Site": "none"})
-                    await asyncio.sleep(random.uniform(1.5, 2.5))
+                    await asyncio.sleep(3.5)
 
-                    log("INFO", f"event=waf_priming status=stage2 action=warmup jitter={random.uniform(0.2, 0.5):.1f}s")
-                    await self.client.get(f"{self.base_url}/", headers={"Sec-Fetch-Site": "same-origin", "Referer": self.base_url})
-                    await asyncio.sleep(random.uniform(0.5, 1.0))
+                    log("INFO", "event=waf_priming status=stage2 action=warmup jitter=3.0s")
+                    await self.client.get(
+                        f"{self.base_url}/authentication/login",
+                        headers={"Sec-Fetch-Site": "same-origin", "Referer": self.base_url},
+                    )
+                    await asyncio.sleep(3.0)
 
                 start_time = datetime.now()
-                
+
                 # --- TELEMETRY STATE TRACKING ---
                 # Track session source for debug logs
-                if not hasattr(self, '_session_source'):
+                if not hasattr(self, "_session_source"):
                     self._session_source = "NEW"
-                
+
                 waf_status = "ACTIVE"
                 # 1. Initiating Login Page
-                r_init = await self.client.get(login_url, headers={
-                    "Sec-Fetch-Dest": "document",
-                    "Sec-Fetch-Mode": "navigate",
-                    "Sec-Fetch-Site": "same-origin",
-                    "Sec-Fetch-User": "?1"
-                })
+                r_init = await self.client.get(
+                    login_url,
+                    headers={
+                        "Sec-Fetch-Dest": "document",
+                        "Sec-Fetch-Mode": "navigate",
+                        "Sec-Fetch-Site": "same-origin",
+                        "Sec-Fetch-User": "?1",
+                    },
+                )
 
                 # --- INTELLIGENT DETECTION: ARE WE ALREADY IN? ---
                 # Some WAFs or session managers redirect to dashboard if cookies are already good.
                 # We check for vertical layout and user name text specifically in a way that suggests a dashboard
                 has_dashboard_layout = 'data-layout="vertical"' in r_init.text
                 has_user_profile = 'class="user-name-text"' in r_init.text or 'class="user-role-text"' in r_init.text
-                
+
                 if has_dashboard_layout and has_user_profile:
-                    log("SUCCESS", "event=session_id status=pre_authenticated message='Detected application layout. Cookies already valid.'")
+                    log(
+                        "SUCCESS",
+                        "event=session_id status=pre_authenticated message='Detected application layout. Cookies already valid.'",
+                    )
                     await portal_circuit_breaker.record_success()
                     return {
                         "status": "success",
                         "cookies": self.client.cookies.get_dict(),
                         "response_time": (datetime.now() - start_time).total_seconds(),
-                        "session_source": "PERSISTENT"
+                        "session_source": "PERSISTENT",
                     }
 
                 if 'name="tkv"' not in r_init.text:
-                    if "Security Check" in r_init.text or "WAF" in r_init.text:
+                    if "Security Check" in r_init.text or "WAF" in r_init.text or "Checking on progress" in r_init.text:
                         failure_reason = "waf_blocked"
                         log("WARN", f"event=tkv status=blocked_by_waf code={r_init.status_code}")
 
@@ -486,8 +526,12 @@ class LoginHandler:
                         if LoginHandler._waf_cookies:
                             for c in LoginHandler._waf_cookies:
                                 cookie = cast(CookieData, c)
-                                self.client.cookies.set(cookie['name'], cookie['value'],
-                                                        domain=cookie['domain'], path=cookie.get('path', '/'))
+                                self.client.cookies.set(
+                                    cookie["name"],
+                                    cookie["value"],
+                                    domain=cookie["domain"],
+                                    path=cookie.get("path", "/"),
+                                )
                             # If we just applied cookies, retry this attempt immediately
                             await asyncio.sleep(1.0)
 
@@ -501,11 +545,15 @@ class LoginHandler:
                                     if cookies:
                                         self._session_source = "BRIDGE"
                                         waf_status = "BYPASSED"
-                                        LoginHandler._waf_cookies = cast(List[CookieData], cookies)
+                                        LoginHandler._waf_cookies = cast(list[CookieData], cookies)
                                         for c in LoginHandler._waf_cookies:
                                             cookie = cast(CookieData, c)
-                                            self.client.cookies.set(cookie['name'], cookie['value'],
-                                                                    domain=cookie['domain'], path=cookie.get('path', '/'))
+                                            self.client.cookies.set(
+                                                cookie["name"],
+                                                cookie["value"],
+                                                domain=cookie["domain"],
+                                                path=cookie.get("path", "/"),
+                                            )
                                         log("SUCCESS", "event=waf_bridge status=success action=cookies_synced")
                                     else:
                                         failure_reason = "browser_bridge_failed"
@@ -524,11 +572,11 @@ class LoginHandler:
                             if browser_result:
                                 return browser_result
                             failure_reason = "browser_bridge_failed"
-                            return None
+                            return {"status": "failed", "message": "browser_bridge_failed"}
 
                         await asyncio.sleep(1.0)
                     else:
-                        log_snippet = r_init.text[:150].replace('\n', ' ')
+                        log_snippet = r_init.text[:150].replace("\n", " ")
                         log("WARN", f"event=tkv status=missing code={r_init.status_code} snippet='{log_snippet}...'")
                     continue
 
@@ -559,25 +607,21 @@ class LoginHandler:
                         await asyncio.sleep(0.4)
                     continue
                 for index, (conf, code, mode) in enumerate(candidates, start=1):
-                    log("INFO",
-                        f"event=login_attempt attempt={attempt}.{index} mode={mode} captcha={Fore.YELLOW}{code}")
-                    
+                    log(
+                        "INFO", f"event=login_attempt attempt={attempt}.{index} mode={mode} captcha={Fore.YELLOW}{code}"
+                    )
+
                     if status_callback:
                         await status_callback(f"🧩 Memecahkan kode captcha (Percobaan {attempt}.{index})...")
 
-                    data = {
-                        "tkv": tkv,
-                        "username": username,
-                        "password": password,
-                        "kv-captcha": code
-                    }
+                    data = {"tkv": tkv, "username": username, "password": password, "kv-captcha": code}
 
                     request_start_time = time.time()
-                    r_post = await self.client.post(login_url, data=data, headers={
-                        "X-Requested-With": "XMLHttpRequest",
-                        "Origin": self.base_url,
-                        "Referer": login_url
-                    })
+                    r_post = await self.client.post(
+                        login_url,
+                        data=data,
+                        headers={"X-Requested-With": "XMLHttpRequest", "Origin": self.base_url, "Referer": login_url},
+                    )
                     response_time = time.time() - request_start_time
 
                     try:
@@ -591,10 +635,10 @@ class LoginHandler:
                                 "response_time": response_time,
                                 "attempts": attempt,
                                 "captcha_code": code,
-                                "session_source": getattr(self, '_session_source', 'NEW'),
+                                "session_source": getattr(self, "_session_source", "NEW"),
                                 "waf_status": waf_status,
                                 "public_ip": await self.get_public_ip(),
-                                "user_agent": self.user_agent
+                                "user_agent": self.user_agent,
                             }
                         else:
                             msg = res.get("message", "").lower()
@@ -605,7 +649,14 @@ class LoginHandler:
                                 log("ERROR", f"event=login status=failed message={res.get('message')}")
                                 clear_context()
                                 # Terminal failure if account not found or password explicitly wrong
-                                fatal_keywords = ["belum terdaftar", "salah nip", "salah password", "tidak aktif", "login gagal", "tidak ditemukan"]
+                                fatal_keywords = [
+                                    "belum terdaftar",
+                                    "salah nip",
+                                    "salah password",
+                                    "tidak aktif",
+                                    "login gagal",
+                                    "tidak ditemukan",
+                                ]
                                 if any(k in msg for k in fatal_keywords):
                                     return {"status": "terminal", "message": res.get("message")}
                                 failure_reason = res.get("message") or "login_failed"
@@ -616,8 +667,9 @@ class LoginHandler:
                             clear_context()
                             await portal_circuit_breaker.record_success()
                             return {
-                                "cookies": self.client.cookies,
-                                "response_time": response_time
+                                "status": "success",
+                                "cookies": self.client.cookies.get_dict(),
+                                "response_time": response_time,
                             }
 
             except Exception as e:
@@ -642,11 +694,11 @@ class LoginHandler:
         self,
         username: str,
         password: str,
-        action: Optional[str] = None,
-        location: Optional[str] = None,
-        status_callback: Optional[Callable[[str], Coroutine[Any, Any, None]]] = None,
-        start_time: Optional[datetime] = None,
-    ) -> Optional[dict[str, Any]]:
+        action: str | None = None,
+        location: str | None = None,
+        status_callback: Callable[[str], Coroutine[Any, Any, None]] | None = None,
+        start_time: datetime | None = None,
+    ) -> dict[str, Any] | None:
         log("STEP", "event=emergency_bridge status=launching message='Escalating to full browser login fallback.'")
         if status_callback:
             await status_callback("🌐 Menjalankan fallback login browser penuh...")
@@ -668,7 +720,7 @@ class LoginHandler:
                 "session_source": "BRIDGE",
                 "waf_status": "BYPASSED",
                 "public_ip": await self.get_public_ip(),
-                "user_agent": self.user_agent
+                "user_agent": self.user_agent,
             }
         if res_browser:
             await portal_circuit_breaker.record_success()
@@ -679,7 +731,7 @@ class LoginHandler:
                 "session_source": "BRIDGE",
                 "waf_status": "BYPASSED",
                 "public_ip": await self.get_public_ip(),
-                "user_agent": self.user_agent
+                "user_agent": self.user_agent,
             }
         return {"status": "failed", "message": "Browser bridge login failed"}
 
@@ -700,29 +752,28 @@ class LoginHandler:
                 async with async_playwright() as p:
                     browser = await p.chromium.launch(headless=headless)
                     context = await browser.new_context(
-                        user_agent=self.user_agent,
-                        viewport={'width': 1280, 'height': 720}
+                        user_agent=self.user_agent, viewport={"width": 1280, "height": 720}
                     )
                     page = await context.new_page()
 
                     login_url = f"{self.base_url}/authentication/login"
                     log("INFO", f"event=waf_browser status=opened url={login_url}")
-                    
+
                     # --- OPTIMIZATION: ASSET BLOCKING & ROUTE INTERCEPTION ---
                     async def intercepted_request(route):
                         resource_type = route.request.resource_type
                         url = route.request.url.lower()
-                        
+
                         # Block heavy assets except Captcha
                         if resource_type in ["image", "font", "media", "stylesheet"]:
                             if "captcha" not in url:
                                 return await route.abort()
-                        
+
                         # Block non-essential tracking/animation scripts
                         blocklist = ["aos.js", "particles.js", "lord-icon", "google-analytics", "font-awesome"]
                         if any(b in url for b in blocklist):
                             return await route.abort()
-                            
+
                         return await route.continue_()
 
                     await page.route("**/*", intercepted_request)
@@ -730,7 +781,7 @@ class LoginHandler:
 
                     # 1. Wait for WAF to clear and Login Page to appear
                     log("INFO", "event=waf_browser status=waiting action=clearing_waf")
-                    
+
                     # Check for TKV every 0.5s for faster handshake
                     is_ready = False
                     for _ in range(60):
@@ -770,7 +821,7 @@ class LoginHandler:
                             "(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }",
                             password,
                         )
-                        
+
                         # Solve Captcha natively
                         captcha_img = await page.query_selector('img[src*="captcha"]')
                         if captcha_img:
@@ -785,46 +836,56 @@ class LoginHandler:
                                     code,
                                 )
                                 await page.locator('button[type="submit"]').click(force=True)
-                                
+
                                 # Wait for navigation or error
                                 await asyncio.sleep(3)
-                                
+
                                 if "dashboard" in page.url or "user-name-text" in await page.content():
                                     log("SUCCESS", "event=waf_browser status=login_success")
                                     await portal_circuit_breaker.record_success()
-                                    
+
                                     # 2.1 IF ACTION PROVIDED: Perform Attendance in Browser Session
                                     if action:
                                         log("INFO", f"event=waf_browser status=executing_attendance action={action}")
-                                        attendance_res = await self._perform_attendance_in_browser(page, action, location)
+                                        attendance_res = await self._perform_attendance_in_browser(
+                                            page, action, location
+                                        )
                                         # Return a combined result
                                         cookies_list = await context.cookies()
-                                        formatted_cookies = [{"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]} for c in cookies_list]
+                                        formatted_cookies = [
+                                            {
+                                                "name": c["name"],
+                                                "value": c["value"],
+                                                "domain": c["domain"],
+                                                "path": c["path"],
+                                            }
+                                            for c in cookies_list
+                                        ]
                                         await browser.close()
                                         return {
                                             "status": "success",
                                             "cookies": formatted_cookies,
-                                            "attendance_result": attendance_res
+                                            "attendance_result": attendance_res,
                                         }
                                 else:
-                                    log("WARN", "event=waf_browser status=login_pending message='Manual intervention might be needed'")
+                                    log(
+                                        "WARN",
+                                        "event=waf_browser status=login_pending message='Manual intervention might be needed'",
+                                    )
                                     # We wait a bit more just in case
                                     await page.wait_for_timeout(5000)
 
                     # 3. Extract final cookies
                     log("SUCCESS", "event=waf_browser status=extracting_cookies")
                     cookies_list = await context.cookies()
-                    
+
                     # Convert to our TypedDict format
                     formatted_cookies = []
                     for c in cookies_list:
-                        formatted_cookies.append({
-                            "name": c["name"],
-                            "value": c["value"],
-                            "domain": c["domain"],
-                            "path": c["path"]
-                        })
-                        
+                        formatted_cookies.append(
+                            {"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]}
+                        )
+
                     await browser.close()
                     return formatted_cookies
 
@@ -842,20 +903,20 @@ class LoginHandler:
             # 1. Navigate to Dashboard explicitly
             await page.goto(f"{self.base_url}/home/dashboard")
             await page.wait_for_load_state("networkidle")
-            
+
             # 2. Extract CSRF token from page
-            csrf_token = await page.eval_on_selector('meta[name="csrf-token"]', 'el => el.content')
+            csrf_token = await page.eval_on_selector('meta[name="csrf-token"]', "el => el.content")
             if not csrf_token:
                 log("ERROR", "event=browser_attendance status=failed message='CSRF Token not found'")
                 return False
-                
+
             # 3. Perform the AJAX POST via page.evaluate to stay in the same session
             # This is the most reliable way as it uses the browser's own fetch mechanism
             log("INFO", f"event=browser_attendance status=submitting action={action}")
-            
+
             # Prepare payload
             location = location or "-7.3995,109.8895"
-            
+
             script = f"""
             fetch('/attendance/presence', {{
                 method: 'POST',
@@ -867,14 +928,14 @@ class LoginHandler:
                 body: 'location={location}&timezone=Asia/Jakarta&type={action}'
             }}).then(res => res.json())
             """
-            
+
             result = await page.evaluate(script)
             log("INFO", f"event=browser_attendance status=result data={result}")
-            
+
             if result.get("status") == "success" or "berhasil" in str(result).lower():
                 return True
             return False
-            
+
         except Exception as e:
             log("ERROR", f"event=browser_attendance exception={e}")
             return False

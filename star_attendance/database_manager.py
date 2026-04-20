@@ -3,7 +3,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 
 from sqlalchemy import func, text
 from sqlalchemy.orm import joinedload
@@ -20,15 +20,14 @@ from star_attendance.core.timeutils import (
     to_local,
 )
 from star_attendance.db.manager import db_manager
-from star_attendance.db.models import AuditLog, GlobalSetting, UPT, User, UserSession
-from star_attendance.db.enums import AuditAction, AuditStatus
+from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserSession
 from star_attendance.db.types import AuditLogData, UserData
 
 DEFAULT_LOCATION_LATITUDE = -6.2210973
 DEFAULT_LOCATION_LONGITUDE = 106.8314724
 DEFAULT_WORKDAYS = "mon-fri"
 
-WORKDAY_PRESETS: Dict[str, Dict[str, str]] = {
+WORKDAY_PRESETS: dict[str, dict[str, str]] = {
     "mon-fri": {"label": "Senin-Jumat", "cron": "mon-fri"},
     "mon-sat": {"label": "Senin-Sabtu", "cron": "mon-sat"},
     "everyday": {"label": "Setiap Hari", "cron": "mon-sun"},
@@ -53,7 +52,7 @@ WORKDAY_ALIASES = {
     "*": "everyday",
 }
 
-DEFAULT_SETTINGS: Dict[str, Any] = {
+DEFAULT_SETTINGS: dict[str, Any] = {
     "default_location": "Kementerian Imigrasi dan Pemasyarakatan Republik Indonesia",
     "default_latitude": DEFAULT_LOCATION_LATITUDE,
     "default_longitude": DEFAULT_LOCATION_LONGITUDE,
@@ -102,7 +101,7 @@ def _coerce_float(value: Any, default: float) -> float:
         return default
 
 
-def _coerce_optional_float(value: Any) -> Optional[float]:
+def _coerce_optional_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     try:
@@ -119,7 +118,7 @@ def _stringify_setting(value: Any) -> str:
     return str(value)
 
 
-def _coerce_telegram_id(value: Any) -> Optional[int]:
+def _coerce_telegram_id(value: Any) -> int | None:
     if value in (None, ""):
         return None
     if isinstance(value, bool):
@@ -148,13 +147,7 @@ def normalize_workdays(value: Any, default: str = DEFAULT_WORKDAYS) -> str:
         value = value.value
     if value in (None, ""):
         return default
-    normalized = (
-        str(value)
-        .strip()
-        .lower()
-        .replace("_", "-")
-        .replace(" ", "-")
-    )
+    normalized = str(value).strip().lower().replace("_", "-").replace(" ", "-")
     return WORKDAY_ALIASES.get(normalized, default)
 
 
@@ -187,8 +180,8 @@ def _resolve_auto_attendance_status(
     has_password: bool,
     cron_in: str,
     cron_out: str,
-    latitude: Optional[float],
-    longitude: Optional[float],
+    latitude: float | None,
+    longitude: float | None,
 ) -> tuple[bool, str]:
     if not automation_enabled:
         return False, "Otomasi global dimatikan."
@@ -211,10 +204,10 @@ class SupabaseManager:
     """
 
     _cache_lock = threading.RLock()
-    _settings_cache: Optional[tuple[float, Dict[str, Any]]] = None
-    _user_cache: Dict[str, tuple[float, UserData]] = {}
-    _users_with_passwords_cache: Optional[tuple[float, List[UserData]]] = None
-    _user_summaries_cache: Optional[tuple[float, List[UserData]]] = None
+    _settings_cache: tuple[float, dict[str, Any]] | None = None
+    _user_cache: dict[str, tuple[float, UserData]] = {}
+    _users_with_passwords_cache: tuple[float, list[UserData]] | None = None
+    _user_summaries_cache: tuple[float, list[UserData]] | None = None
 
     def __init__(self) -> None:
         pass
@@ -238,7 +231,7 @@ class SupabaseManager:
             self.__class__._users_with_passwords_cache = None
             self.__class__._user_summaries_cache = None
 
-    def _invalidate_user_cache(self, nip: Optional[str] = None) -> None:
+    def _invalidate_user_cache(self, nip: str | None = None) -> None:
         with self._cache_lock:
             if nip:
                 self.__class__._user_cache.pop(nip, None)
@@ -247,7 +240,7 @@ class SupabaseManager:
             self.__class__._users_with_passwords_cache = None
             self.__class__._user_summaries_cache = None
 
-    def _decrypt_password(self, raw_password: Optional[str]) -> Optional[str]:
+    def _decrypt_password(self, raw_password: str | None) -> str | None:
         if raw_password and raw_password.startswith("gAAAA"):
             try:
                 return security_manager.decrypt_password(raw_password)
@@ -255,7 +248,7 @@ class SupabaseManager:
                 return raw_password
         return raw_password
 
-    def _encrypt_password(self, raw_password: Optional[str]) -> Optional[str]:
+    def _encrypt_password(self, raw_password: str | None) -> str | None:
         if raw_password is None:
             return None
         password = str(raw_password).strip()
@@ -265,7 +258,7 @@ class SupabaseManager:
             return password
         return security_manager.encrypt_password(password)
 
-    def _resolve_upt_id(self, session: Any, upt_input: Any) -> Optional[str]:
+    def _resolve_upt_id(self, session: Any, upt_input: Any) -> str | None:
         if not upt_input:
             return None
         try:
@@ -279,7 +272,7 @@ class SupabaseManager:
             session.flush()
             return str(new_upt.id)
 
-    def _merge_settings(self, raw_values: Dict[str, Any]) -> Dict[str, Any]:
+    def _merge_settings(self, raw_values: dict[str, Any]) -> dict[str, Any]:
         merged = dict(DEFAULT_SETTINGS)
         merged.update(raw_values)
         merged["default_location"] = str(merged.get("default_location") or DEFAULT_SETTINGS["default_location"])
@@ -305,12 +298,12 @@ class SupabaseManager:
         )
         return merged
 
-    def _serialize_user(self, user: Any, db_settings: Optional[Dict[str, Any]] = None) -> UserData:
+    def _serialize_user(self, user: Any, db_settings: dict[str, Any] | None = None) -> UserData:
         effective_settings = db_settings or self.get_settings()
         upt = getattr(user, "upt", None)
         personal_latitude = getattr(user, "personal_latitude", None)
         personal_longitude = getattr(user, "personal_longitude", None)
-        raw_password = cast(Optional[str], getattr(user, "password", None))
+        raw_password = cast(str | None, getattr(user, "password", None))
         decrypted_password = self._decrypt_password(raw_password)
         default_latitude = _coerce_optional_float(effective_settings.get("default_latitude"))
         default_longitude = _coerce_optional_float(effective_settings.get("default_longitude"))
@@ -344,8 +337,8 @@ class SupabaseManager:
             longitude=longitude,
         )
         return {
-            "nip": str(getattr(user, "nip")),
-            "nama": str(getattr(user, "nama")),
+            "nip": str(user.nip),
+            "nama": str(user.nama),
             "nama_upt": str(upt.nama_upt) if upt else "Unknown",
             "latitude": latitude,
             "longitude": longitude,
@@ -369,10 +362,10 @@ class SupabaseManager:
 
     # --- USER OPERATIONS (POSTGRES PRIMARY) ---
 
-    def get_user_by_nip(self, nip: str) -> Optional[UserData]:
+    def get_user_by_nip(self, nip: str) -> UserData | None:
         return self.get_user_data(nip)
 
-    def get_user_data(self, nip: str) -> Optional[UserData]:
+    def get_user_data(self, nip: str) -> UserData | None:
         with self._cache_lock:
             cached = self.__class__._user_cache.get(nip)
             if cached and self._is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
@@ -389,7 +382,7 @@ class SupabaseManager:
                 self.__class__._user_cache[nip] = (self._now_monotonic(), serialized)
             return cast(UserData, dict(serialized))
 
-    def get_user_summaries(self) -> List[UserData]:
+    def get_user_summaries(self) -> list[UserData]:
         with self._cache_lock:
             cached = self.__class__._user_summaries_cache
             if cached and self._is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
@@ -397,19 +390,14 @@ class SupabaseManager:
 
         db_settings = self.get_settings()
         with db_manager.get_session() as session:
-            users = (
-                session.query(User)
-                .options(joinedload(User.upt))
-                .order_by(User.nama.asc())
-                .all()
-            )
+            users = session.query(User).options(joinedload(User.upt)).order_by(User.nama.asc()).all()
             summaries = [self._serialize_user(user, db_settings=db_settings) for user in users]
 
         with self._cache_lock:
             self.__class__._user_summaries_cache = (self._now_monotonic(), summaries)
         return [cast(UserData, dict(item)) for item in summaries]
 
-    def get_user_by_telegram_id(self, tid: int) -> Optional[UserData]:
+    def get_user_by_telegram_id(self, tid: int) -> UserData | None:
         with db_manager.get_session() as session:
             user = session.query(User).filter(User.telegram_id == int(tid)).first()
             if not user:
@@ -423,13 +411,13 @@ class SupabaseManager:
                 return ", ".join([str(u.nama_upt) for u in upts])
         return settings.UPT_EXAMPLE_FALLBACK
 
-    def get_all_upts(self) -> List[Dict[str, Any]]:
+    def get_all_upts(self) -> list[dict[str, Any]]:
         """Returns all UPTs as a list of dicts for keyboard generation."""
         with db_manager.get_session() as session:
             upts = session.query(UPT).order_by(UPT.nama_upt).all()
             return [{"id": str(u.id), "nama_upt": str(u.nama_upt)} for u in upts]
 
-    def add_user(self, data: Dict[str, Any]) -> bool:
+    def add_user(self, data: dict[str, Any]) -> bool:
         nip = data.get("nip")
         if not nip:
             return False
@@ -454,7 +442,7 @@ class SupabaseManager:
                     existing_user.password = encrypted_password
                 if actual_upt_id:
                     existing_user.upt_id = actual_upt_id
-                
+
                 if new_tid is not None:
                     existing_user.telegram_id = new_tid
                 existing_user.role = data.get("role", existing_user.role)
@@ -466,22 +454,24 @@ class SupabaseManager:
                     existing_user.is_active = bool(data["is_active"])
                 session.add(existing_user)
             else:
-                session.add(User(
-                    id=data.get("id") or uuid.uuid4(),
-                    nip=nip,
-                    nama=data.get("nama", ""),
-                    password=encrypted_password or None,
-                    upt_id=actual_upt_id,
-                    telegram_id=_coerce_telegram_id(data.get("telegram_id")),
-                    role=data.get("role", "user"),
-                    is_admin=bool(data.get("is_admin", False)),
-                    is_active=bool(data.get("is_active", True)),
-                    cron_in=str(data["cron_in"]).strip() if data.get("cron_in") not in (None, "") else None,
-                    cron_out=str(data["cron_out"]).strip() if data.get("cron_out") not in (None, "") else None,
-                    workdays=normalize_workdays(data.get("workdays"), str(db_settings["default_workdays"]))
-                    if data.get("workdays") not in (None, "")
-                    else None,
-                ))
+                session.add(
+                    User(
+                        id=data.get("id") or uuid.uuid4(),
+                        nip=nip,
+                        nama=data.get("nama", ""),
+                        password=encrypted_password or None,
+                        upt_id=actual_upt_id,
+                        telegram_id=_coerce_telegram_id(data.get("telegram_id")),
+                        role=data.get("role", "user"),
+                        is_admin=bool(data.get("is_admin", False)),
+                        is_active=bool(data.get("is_active", True)),
+                        cron_in=str(data["cron_in"]).strip() if data.get("cron_in") not in (None, "") else None,
+                        cron_out=str(data["cron_out"]).strip() if data.get("cron_out") not in (None, "") else None,
+                        workdays=normalize_workdays(data.get("workdays"), str(db_settings["default_workdays"]))
+                        if data.get("workdays") not in (None, "")
+                        else None,
+                    )
+                )
 
         self._invalidate_user_cache(str(nip))
         self.add_audit_log(
@@ -492,7 +482,7 @@ class SupabaseManager:
         )
         return True
 
-    def update_user_settings(self, nip: str, settings_update: Dict[str, Any]) -> bool:
+    def update_user_settings(self, nip: str, settings_update: dict[str, Any]) -> bool:
         with db_manager.get_session() as session:
             user = session.query(User).filter(User.nip == nip).first()
             if not user:
@@ -553,7 +543,7 @@ class SupabaseManager:
         )
         return True
 
-    def get_users_with_passwords(self) -> List[UserData]:
+    def get_users_with_passwords(self) -> list[UserData]:
         with self._cache_lock:
             cached = self.__class__._users_with_passwords_cache
             if cached and self._is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
@@ -593,7 +583,7 @@ class SupabaseManager:
 
     # --- SESSION MANAGEMENT (POSTGRES BACKED) ---
 
-    def save_user_session(self, nip: str, session_data: Dict[str, Any]) -> None:
+    def save_user_session(self, nip: str, session_data: dict[str, Any]) -> None:
         with db_manager.get_session() as session:
             user = session.query(User).filter(User.nip == nip).first()
             if not user:
@@ -606,15 +596,17 @@ class SupabaseManager:
                 existing.nip = nip
                 existing.updated_at = now_storage()
             else:
-                session.add(UserSession(
-                    user_id=user.id,
-                    nip=nip,
-                    data=session_data,
-                    updated_at=now_storage(),
-                ))
+                session.add(
+                    UserSession(
+                        user_id=user.id,
+                        nip=nip,
+                        data=session_data,
+                        updated_at=now_storage(),
+                    )
+                )
             print(f"Session persisted to Supabase for {nip}.")
 
-    def get_user_session(self, nip: str) -> Optional[Dict[str, Any]]:
+    def get_user_session(self, nip: str) -> dict[str, Any] | None:
         with db_manager.get_session() as session:
             sess = session.query(UserSession).filter(UserSession.nip == nip).first()
             if sess and hasattr(sess, "data"):
@@ -633,22 +625,24 @@ class SupabaseManager:
         action: str,
         status: str,
         message: str,
-        response_time: Optional[float] = None,
+        response_time: float | None = None,
     ) -> None:
         with db_manager.get_session() as session:
             user = session.query(User).filter(User.nip == nip).first()
             user_id = user.id if user else None
 
-            session.add(AuditLog(
-                user_id=user_id,
-                nip=nip,
-                action=action,
-                status=status,
-                message=message,
-                response_time=response_time,
-            ))
+            session.add(
+                AuditLog(
+                    user_id=user_id,
+                    nip=nip,
+                    action=action,
+                    status=status,
+                    message=message,
+                    response_time=response_time,
+                )
+            )
 
-    def get_last_success_action(self, nip: str, action: str) -> tuple[Optional[datetime], Optional[str]]:
+    def get_last_success_action(self, nip: str, action: str) -> tuple[datetime | None, str | None]:
         with db_manager.get_session() as session:
             log = (
                 session.query(AuditLog)
@@ -664,8 +658,9 @@ class SupabaseManager:
                 return log.timestamp, log.message
             return None, None
 
-    def get_last_success_actions(self, nip: str) -> Dict[str, Optional[datetime]]:
-        from sqlalchemy import cast, String
+    def get_last_success_actions(self, nip: str) -> dict[str, datetime | None]:
+        from sqlalchemy import String, cast
+
         with db_manager.get_session() as session:
             rows = (
                 session.query(
@@ -681,21 +676,25 @@ class SupabaseManager:
                 .all()
             )
 
-            result: Dict[str, Optional[datetime]] = {"in": None, "out": None}
+            result: dict[str, datetime | None] = {"in": None, "out": None}
             for action_str, latest_timestamp in rows:
                 action_str = str(action_str).lower()
                 if "." in action_str:
                     action_str = action_str.split(".")[-1]
-                
+
                 if action_str in {"in", "checkin"}:
-                    if result["in"] is None or (latest_timestamp and (result["in"] is None or latest_timestamp > result["in"])):
+                    if result["in"] is None or (
+                        latest_timestamp and (result["in"] is None or latest_timestamp > result["in"])
+                    ):
                         result["in"] = latest_timestamp
                 elif action_str in {"out", "checkout"}:
-                    if result["out"] is None or (latest_timestamp and (result["out"] is None or latest_timestamp > result["out"])):
+                    if result["out"] is None or (
+                        latest_timestamp and (result["out"] is None or latest_timestamp > result["out"])
+                    ):
                         result["out"] = latest_timestamp
             return result
 
-    def get_user_history(self, nip: str, limit: int = 10) -> List[AuditLogData]:
+    def get_user_history(self, nip: str, limit: int = 10) -> list[AuditLogData]:
         with db_manager.get_session() as session:
             logs = (
                 session.query(AuditLog)
@@ -716,26 +715,31 @@ class SupabaseManager:
                 for log in logs
             ]
 
-    def get_system_metrics(self) -> Dict[str, Any]:
+    def get_system_metrics(self) -> dict[str, Any]:
         """Fetch high-level system metrics for telemetry."""
-        from sqlalchemy import func
         from datetime import date
+
+        from sqlalchemy import func
+
         with db_manager.get_session() as session:
             total_users = session.query(func.count(User.id)).filter(User.is_active == True).scalar()
-            total_with_pass = session.query(func.count(User.id)).filter(User.is_active == True, User.password != None).scalar()
-            success_today = session.query(func.count(AuditLog.id)).filter(
-                AuditLog.status == "success",
-                AuditLog.timestamp >= date.today()
-            ).scalar()
-            
+            total_with_pass = (
+                session.query(func.count(User.id)).filter(User.is_active == True, User.password != None).scalar()
+            )
+            success_today = (
+                session.query(func.count(AuditLog.id))
+                .filter(AuditLog.status == "success", AuditLog.timestamp >= date.today())
+                .scalar()
+            )
+
             return {
                 "active_personnel": total_users,
                 "managed_personnel": total_with_pass,
                 "success_today": success_today,
-                "db_provider": "Supabase (PostgreSQL)"
+                "db_provider": "Supabase (PostgreSQL)",
             }
 
-    def get_global_audit_logs(self, limit: int = 20) -> List[AuditLogData]:
+    def get_global_audit_logs(self, limit: int = 20) -> list[AuditLogData]:
         with db_manager.get_session() as session:
             logs = session.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit).all()
             return [
@@ -753,10 +757,10 @@ class SupabaseManager:
     def get_recent_audit_feed(
         self,
         limit: int = 200,
-        status: Optional[str] = None,
-        action: Optional[str] = None,
-        nip: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        status: str | None = None,
+        action: str | None = None,
+        nip: str | None = None,
+    ) -> list[dict[str, Any]]:
         with db_manager.get_session() as session:
             query = (
                 session.query(AuditLog, User.nama)
@@ -773,19 +777,21 @@ class SupabaseManager:
 
             rows = query.limit(limit).all()
 
-        feed: List[Dict[str, Any]] = []
+        feed: list[dict[str, Any]] = []
         for log, user_name in rows:
             local_ts = to_local(log.timestamp)
-            feed.append({
-                "nip": str(log.nip),
-                "nama": user_name or ("System" if str(log.nip).upper() == "SYSTEM" else "Unknown"),
-                "action": str(log.action),
-                "status": str(log.status).upper(),
-                "message": str(log.message),
-                "response_time": log.response_time,
-                "timestamp": format_formal_timestamp(local_ts),
-                "timestamp_raw": isoformat_local(local_ts),
-            })
+            feed.append(
+                {
+                    "nip": str(log.nip),
+                    "nama": user_name or ("System" if str(log.nip).upper() == "SYSTEM" else "Unknown"),
+                    "action": str(log.action),
+                    "status": str(log.status).upper(),
+                    "message": str(log.message),
+                    "response_time": log.response_time,
+                    "timestamp": format_formal_timestamp(local_ts),
+                    "timestamp_raw": isoformat_local(local_ts),
+                }
+            )
         return feed
 
     def clear_audit_logs(self) -> int:
@@ -793,8 +799,9 @@ class SupabaseManager:
             deleted = session.query(AuditLog).delete()
         return int(deleted or 0)
 
-    def get_daily_stats(self) -> Dict[str, int]:
-        from sqlalchemy import cast, String
+    def get_daily_stats(self) -> dict[str, int]:
+        from sqlalchemy import String, cast
+
         start_utc, end_utc = local_day_bounds()
         with db_manager.get_session() as session:
             rows = (
@@ -825,7 +832,7 @@ class SupabaseManager:
                 normalized_action = "in"
             elif normalized_action == "checkout":
                 normalized_action = "out"
-                
+
             normalized_status = str(status_str).lower()
             if normalized_action not in {"in", "out"}:
                 continue
@@ -837,8 +844,9 @@ class SupabaseManager:
                 stats["total_attempts"] += int(count)
         return stats
 
-    def get_metrics_overview(self, hours: int = 24) -> Dict[str, Any]:
-        from sqlalchemy import cast, String
+    def get_metrics_overview(self, hours: int = 24) -> dict[str, Any]:
+        from sqlalchemy import String, cast
+
         window_start = now_utc() - timedelta(hours=hours)
         with db_manager.get_session() as session:
             rows = (
@@ -853,25 +861,28 @@ class SupabaseManager:
                 .all()
             )
             try:
-                dead_letter_count = session.execute(
-                    text("SELECT COUNT(*) FROM public.attendance_dead_letters WHERE failed_at >= :window_start"),
-                    {"window_start": window_start},
-                ).scalar_one_or_none() or 0
+                dead_letter_count = (
+                    session.execute(
+                        text("SELECT COUNT(*) FROM public.attendance_dead_letters WHERE failed_at >= :window_start"),
+                        {"window_start": window_start},
+                    ).scalar_one_or_none()
+                    or 0
+                )
             except Exception:
                 dead_letter_count = 0
 
-        totals: Dict[str, int] = {"total": 0, "success": 0, "failed": 0, "in": 0, "out": 0}
-        avg_samples: List[float] = []
+        totals: dict[str, int] = {"total": 0, "success": 0, "failed": 0, "in": 0, "out": 0}
+        avg_samples: list[float] = []
         for action_str, status_str, count, avg_response_time in rows:
             normalized_status = str(status_str).lower()
             normalized_action = str(action_str).lower()
-            
+
             totals["total"] += int(count)
             if normalized_status in {"success", "ok"}:
                 totals["success"] += int(count)
             else:
                 totals["failed"] += int(count)
-            
+
             if normalized_action in {"in", "checkin"}:
                 totals["in"] += int(count)
             if normalized_action in {"out", "checkout"}:
@@ -880,19 +891,23 @@ class SupabaseManager:
                 avg_samples.append(float(avg_response_time))
 
         failure_rate = (totals["failed"] / totals["total"]) if totals["total"] else 0.0
-        alerts: List[Dict[str, Any]] = []
+        alerts: list[dict[str, Any]] = []
         if failure_rate >= settings.ALERT_FAILURE_RATE_THRESHOLD:
-            alerts.append({
-                "level": "warning",
-                "code": "high_failure_rate",
-                "message": f"Failure rate {failure_rate:.1%} dalam {hours} jam terakhir melewati ambang.",
-            })
+            alerts.append(
+                {
+                    "level": "warning",
+                    "code": "high_failure_rate",
+                    "message": f"Failure rate {failure_rate:.1%} dalam {hours} jam terakhir melewati ambang.",
+                }
+            )
         if int(dead_letter_count) > 0:
-            alerts.append({
-                "level": "warning",
-                "code": "dead_letters_present",
-                "message": f"Terdapat {dead_letter_count} job di dead-letter queue.",
-            })
+            alerts.append(
+                {
+                    "level": "warning",
+                    "code": "dead_letters_present",
+                    "message": f"Terdapat {dead_letter_count} job di dead-letter queue.",
+                }
+            )
 
         return {
             "window_hours": hours,
@@ -904,38 +919,44 @@ class SupabaseManager:
             "alerts": alerts,
         }
 
-    def get_recent_dead_letters(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_dead_letters(self, limit: int = 10) -> list[dict[str, Any]]:
         with db_manager.get_session() as session:
-            rows = session.execute(
-                text(
-                    """
+            rows = (
+                session.execute(
+                    text(
+                        """
                     SELECT request_key, nip, action, reason, attempts, last_error, failed_at
                     FROM public.attendance_dead_letters
                     ORDER BY failed_at DESC
                     LIMIT :limit
                     """
-                ),
-                {"limit": limit},
-            ).mappings().all()
+                    ),
+                    {"limit": limit},
+                )
+                .mappings()
+                .all()
+            )
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for row in rows:
             failed_at_local = to_local(row["failed_at"])
-            results.append({
-                "request_key": str(row["request_key"]),
-                "nip": str(row["nip"]),
-                "action": str(row["action"]),
-                "reason": str(row["reason"]),
-                "attempts": int(row["attempts"]),
-                "last_error": row["last_error"],
-                "failed_at": format_formal_timestamp(failed_at_local),
-                "failed_at_raw": isoformat_local(failed_at_local),
-            })
+            results.append(
+                {
+                    "request_key": str(row["request_key"]),
+                    "nip": str(row["nip"]),
+                    "action": str(row["action"]),
+                    "reason": str(row["reason"]),
+                    "attempts": int(row["attempts"]),
+                    "last_error": row["last_error"],
+                    "failed_at": format_formal_timestamp(failed_at_local),
+                    "failed_at_raw": isoformat_local(failed_at_local),
+                }
+            )
         return results
 
     def has_successful_attendance_today(self, nip: str, action: str) -> bool:
         start_utc, end_utc = local_day_bounds()
-        
+
         # Normalize action to handle both 'in' and 'checkin'
         action_variants = [action]
         if action == "in":
@@ -948,7 +969,8 @@ class SupabaseManager:
             action_variants.append("out")
 
         with db_manager.get_session() as session:
-            from sqlalchemy import cast, String
+            from sqlalchemy import String, cast
+
             row = (
                 session.query(AuditLog.id)
                 .filter(
@@ -1005,10 +1027,10 @@ class SupabaseManager:
         request_key: str,
         nip: str,
         action: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         reason: str,
         attempts: int,
-        last_error: Optional[str] = None,
+        last_error: str | None = None,
     ) -> None:
         with db_manager.get_session() as session:
             session.execute(
@@ -1040,7 +1062,7 @@ class SupabaseManager:
 
     # --- GLOBAL SETTINGS ---
 
-    def get_settings(self) -> Dict[str, Any]:
+    def get_settings(self) -> dict[str, Any]:
         with self._cache_lock:
             cached = self.__class__._settings_cache
             if cached and self._is_cache_valid(cached[0], settings.SETTINGS_CACHE_TTL_SECONDS):
@@ -1060,7 +1082,7 @@ class SupabaseManager:
             session.merge(GlobalSetting(key=key, value=_stringify_setting(value)))
         self._invalidate_settings_cache()
 
-    def update_global_settings(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def update_global_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed_keys = {
             "default_location",
             "default_latitude",
@@ -1091,7 +1113,7 @@ class SupabaseManager:
         )
         return self.get_settings()
 
-    def get_mass_status(self) -> Dict[str, Any]:
+    def get_mass_status(self) -> dict[str, Any]:
         values = self.get_settings()
         return {
             "active": values.get("mass_active", "0"),
@@ -1106,7 +1128,7 @@ class SupabaseManager:
             "out_failed": int(values.get("mass_out_failed", 0)),
         }
 
-    def update_mass_status(self, data: Dict[str, Any]) -> None:
+    def update_mass_status(self, data: dict[str, Any]) -> None:
         for key, value in data.items():
             self.set_setting(f"mass_{key}", str(value))
 
@@ -1119,7 +1141,7 @@ class SupabaseManager:
     def is_mass_stop_requested(self) -> bool:
         return self.get_settings().get("mass_stop") == "1"
 
-    def search_users(self, query: str) -> List[UserData]:
+    def search_users(self, query: str) -> list[UserData]:
         db_settings = self.get_settings()
         with db_manager.get_session() as session:
             users = (
@@ -1130,7 +1152,7 @@ class SupabaseManager:
             )
             return [self._serialize_user(user, db_settings=db_settings) for user in users]
 
-    def get_all_telegram_ids(self) -> List[int]:
+    def get_all_telegram_ids(self) -> list[int]:
         with db_manager.get_session() as session:
             users = session.query(User).filter(User.telegram_id != None).all()  # noqa: E711
             return sorted({int(user.telegram_id) for user in users if user.telegram_id is not None})

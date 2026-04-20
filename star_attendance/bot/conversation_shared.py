@@ -6,7 +6,7 @@ from typing import Any
 
 from telegram import Update
 
-from star_attendance.database_manager import WORKDAY_ALIASES, WORKDAY_PRESETS, get_workday_label, normalize_workdays
+from star_attendance.database_manager import WORKDAY_ALIASES, WORKDAY_PRESETS, normalize_workdays
 from star_attendance.runtime import get_store
 
 logger = logging.getLogger(__name__)

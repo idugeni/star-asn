@@ -1,7 +1,7 @@
-import os
 from cryptography.fernet import Fernet
 
 from star_attendance.core.config import settings
+
 
 class SecurityManager:
     def __init__(self):

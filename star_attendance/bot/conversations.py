@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from .conversation_admin import (
+    admin_add_loc,
     admin_add_name,
     admin_add_nip,
     admin_add_pass,
+    admin_add_schedule,
     admin_add_start,
     admin_add_upt,
-    admin_add_schedule,
     admin_add_workdays,
-    admin_add_loc,
     admin_confirm_del,
     admin_edit_input,
     admin_edit_start,
@@ -29,9 +29,17 @@ from .conversation_settings import (
 )
 from .conversation_shared import (
     get_user_id,
+)
+from .conversation_shared import (
     parse_bool as _parse_bool,
+)
+from .conversation_shared import (
     parse_workdays as _parse_workdays,
+)
+from .conversation_shared import (
     validate_global_setting as _validate_global_setting,
+)
+from .conversation_shared import (
     validate_time_text as _validate_time_text,
 )
 

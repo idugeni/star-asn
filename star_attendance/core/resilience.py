@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from star_attendance.core.config import settings
 from star_attendance.core.timeutils import isoformat_local
@@ -25,9 +25,9 @@ class PortalCircuitBreaker:
 
     async def allow_request(self) -> bool:
         async with self._lock:
-            if self._opened_until and datetime.now(timezone.utc) < self._opened_until:
+            if self._opened_until and datetime.now(UTC) < self._opened_until:
                 return False
-            if self._opened_until and datetime.now(timezone.utc) >= self._opened_until:
+            if self._opened_until and datetime.now(UTC) >= self._opened_until:
                 self._opened_until = None
                 self._failure_count = 0
                 self._reason = None
@@ -44,13 +44,13 @@ class PortalCircuitBreaker:
             self._failure_count += 1
             self._reason = reason
             if self._failure_count >= settings.PORTAL_CIRCUIT_BREAKER_THRESHOLD:
-                self._opened_until = datetime.now(timezone.utc) + timedelta(
+                self._opened_until = datetime.now(UTC) + timedelta(
                     seconds=settings.PORTAL_CIRCUIT_BREAKER_COOLDOWN_SECONDS
                 )
 
     async def snapshot(self) -> dict[str, object]:
         async with self._lock:
-            opened = bool(self._opened_until and datetime.now(timezone.utc) < self._opened_until)
+            opened = bool(self._opened_until and datetime.now(UTC) < self._opened_until)
             return {
                 "opened": opened,
                 "failure_count": self._failure_count,

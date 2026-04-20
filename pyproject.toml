@@ -1,0 +1,91 @@
+[project]
+name = "star-asn"
+version = "1.0.0"
+description = "Enterprise-grade Star ASN Attendance Automation"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "requests",
+    "urllib3",
+    "beautifulsoup4",
+    "python-dotenv",
+    "colorama",
+    "cryptography",
+    "PgQueuer",
+    "sqlalchemy[asyncio]",
+    "psycopg2-binary",
+    "asyncpg",
+    "fake-useragent",
+    "numpy",
+    "Pillow",
+    "opencv-python",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "python-multipart",
+    "python-telegram-bot",
+    "curl_cffi",
+    "ddddocr",
+    "apscheduler",
+    "pydantic-settings",
+    "playwright",
+    "psutil",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "mypy",
+    "types-requests",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*_virtual_*"]
+
+[tool.ruff.lint]
+# E/F/I: Standar, UP: Upgrade sintaks otomatis, B: Bugbear (logic errors), S: Security, C90: Complexity
+select = ["E", "F", "I", "UP", "B", "S", "C90"]
+ignore = ["C901"]
+
+[tool.ruff.lint.per-file-ignores]
+# Ignorir posisi import pada folder tools (karena pola sys.path.append)
+"tools/*.py" = ["E402"]
+# Ignorir posisi import pada telegram_bot.py (karena filterwarnings di awal)
+"star_attendance/telegram_bot.py" = ["E402"]
+# Ignorir assert pada folder tests (karena memang digunakan oleh pytest)
+"tests/*.py" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "typings"
+exclude = [
+    "\\.venv/",
+    "\\.mypy_cache/",
+    "\\.pytest_cache/",
+    "__pycache__/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "colorama.*",
+    "requests.*",
+    "psutil.*",
+    "cv2.*",
+    "ddddocr.*",
+    "apscheduler.*",
+    "curl_cffi.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "strict"

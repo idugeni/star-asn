@@ -1,20 +1,38 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from telegram import Message, Update
 from telegram.ext import ContextTypes
 
-from star_attendance.bot.handler_callbacks import CallbackServices, handle_callback as handle_callback_impl
+from star_attendance.bot.handler_callbacks import CallbackServices
+from star_attendance.bot.handler_callbacks import handle_callback as handle_callback_impl
 from star_attendance.bot.handler_commands import (
     absen_manual as absen_manual_impl,
+)
+from star_attendance.bot.handler_commands import (
     help_command as help_command_impl,
+)
+from star_attendance.bot.handler_commands import (
     manage_hapus as manage_hapus_impl,
+)
+from star_attendance.bot.handler_commands import (
     manage_name as manage_name_impl,
+)
+from star_attendance.bot.handler_commands import (
     manage_nip as manage_nip_impl,
+)
+from star_attendance.bot.handler_commands import (
     manage_pass as manage_pass_impl,
+)
+from star_attendance.bot.handler_commands import (
     manage_upt as manage_upt_impl,
+)
+from star_attendance.bot.handler_commands import (
     profil_command as profil_command_impl,
+)
+from star_attendance.bot.handler_commands import (
     start as start_impl,
 )
 from star_attendance.bot.handler_views import (
@@ -22,9 +40,11 @@ from star_attendance.bot.handler_views import (
     build_global_settings_message,
     build_scheduler_message,
     build_user_manage_keyboard,
-    edit_smart as edit_smart_impl,
     get_global_settings_keyboard,
     get_scheduler_keyboard,
+)
+from star_attendance.bot.handler_views import (
+    edit_smart as edit_smart_impl,
 )
 from star_attendance.bot.ui import get_main_menu, get_users_keyboard, is_admin
 from star_attendance.core.options import RuntimeOptions

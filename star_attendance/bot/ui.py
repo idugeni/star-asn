@@ -1,5 +1,4 @@
-import os
-from typing import Optional, Any
+from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 
@@ -7,7 +6,7 @@ from star_attendance.core.config import settings
 from star_attendance.runtime import get_store
 
 # Global Admin ID from settings
-ADMIN_ID: Optional[int] = settings.TELEGRAM_ADMIN_ID
+ADMIN_ID: int | None = settings.TELEGRAM_ADMIN_ID
 
 store = get_store()
 
@@ -110,7 +109,7 @@ def get_settings_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-async def get_users_keyboard(page: int = 0, limit: int = 6, search_query: Optional[str] = None) -> InlineKeyboardMarkup:
+async def get_users_keyboard(page: int = 0, limit: int = 6, search_query: str | None = None) -> InlineKeyboardMarkup:
     if search_query:
         users = store.search_users(search_query)
     else:
@@ -126,14 +125,14 @@ async def get_users_keyboard(page: int = 0, limit: int = 6, search_query: Option
         *[
             [InlineKeyboardButton(f"👤 {u['nama'][:20]} ({u['nip']})", callback_data=f"manage_user_{u['nip']}")]
             for u in page_users
-        ]
+        ],
     ]
 
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton("◀️ Prev", callback_data=f"view_users_list_{page-1}"))
+        nav_row.append(InlineKeyboardButton("◀️ Prev", callback_data=f"view_users_list_{page - 1}"))
     if end_idx < total:
-        nav_row.append(InlineKeyboardButton("Next ▶️", callback_data=f"view_users_list_{page+1}"))
+        nav_row.append(InlineKeyboardButton("Next ▶️", callback_data=f"view_users_list_{page + 1}"))
 
     if nav_row:
         keyboard.append(nav_row)
@@ -147,11 +146,17 @@ def get_upt_keyboard(upt_list: list[dict[str, Any]], callback_prefix: str = "upt
     keyboard = []
     for i in range(0, len(upt_list), 2):
         row = [
-            InlineKeyboardButton(upt_list[i]["nama_upt"], callback_data=f"{callback_prefix}{upt_list[i]['id'] or upt_list[i]['nama_upt']}")
+            InlineKeyboardButton(
+                upt_list[i]["nama_upt"],
+                callback_data=f"{callback_prefix}{upt_list[i]['id'] or upt_list[i]['nama_upt']}",
+            )
         ]
         if i + 1 < len(upt_list):
             row.append(
-                InlineKeyboardButton(upt_list[i+1]["nama_upt"], callback_data=f"{callback_prefix}{upt_list[i+1]['id'] or upt_list[i+1]['nama_upt']}")
+                InlineKeyboardButton(
+                    upt_list[i + 1]["nama_upt"],
+                    callback_data=f"{callback_prefix}{upt_list[i + 1]['id'] or upt_list[i + 1]['nama_upt']}",
+                )
             )
         keyboard.append(row)
     return InlineKeyboardMarkup(keyboard)

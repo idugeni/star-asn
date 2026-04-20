@@ -27,7 +27,7 @@ class RuntimeOptions:
         source: str | None = None,
         request_key: str | None = None,
         round_retry_max: int | None = None,
-    ) -> "RuntimeOptions":
+    ) -> RuntimeOptions:
         return cls(
             action=action,
             explain=explain,

@@ -6,20 +6,20 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyK
 from telegram.ext import ContextTypes, ConversationHandler
 
 from star_attendance.bot.constants import (
-    WAIT_ADMIN_CONFIRM_DEL,
-    WAIT_ADMIN_INPUT_VAL,
+    WAIT_ADMIN_ADD_LOC,
     WAIT_ADMIN_ADD_NAME,
     WAIT_ADMIN_ADD_NIP,
     WAIT_ADMIN_ADD_PASS,
-    WAIT_ADMIN_ADD_UPT,
     WAIT_ADMIN_ADD_SCHEDULE,
+    WAIT_ADMIN_ADD_UPT,
     WAIT_ADMIN_ADD_WORKDAYS,
-    WAIT_ADMIN_ADD_LOC,
+    WAIT_ADMIN_CONFIRM_DEL,
+    WAIT_ADMIN_INPUT_VAL,
 )
 from star_attendance.runtime import get_internal_api_client
 
 from .conversation_shared import GLOBAL_SETTING_LABELS, store, validate_global_setting
-from .ui import is_admin, get_upt_keyboard
+from .ui import get_upt_keyboard, is_admin
 
 internal_api = get_internal_api_client()
 
@@ -28,7 +28,7 @@ async def _sync_scheduler_notice(update: Update) -> None:
     message = update.effective_message
     if not message:
         return
-        
+
     try:
         # First attempt
         await internal_api.restart_scheduler()
@@ -36,6 +36,7 @@ async def _sync_scheduler_notice(update: Update) -> None:
         try:
             # Short wait and one retry in case API is still starting (cold start)
             import asyncio
+
             await asyncio.sleep(2)
             await internal_api.restart_scheduler()
         except Exception:
@@ -104,27 +105,35 @@ async def admin_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "schedule": "JAM KERJA (Contoh: 07:30 - 16:30)",
         "workdays": "HARI KERJA (Preset)",
     }
-    
+
     prompt = f"🛠 <b>UPDATE {field_map.get(action, action.upper())}</b>\n────────────────\n"
     keyboard = None
-    
+
     if action == "loc":
-        prompt += f"Personel: <code>{target_nip}</code>\n\nMasukkan koordinat dalam format: <code>latitude, longitude</code>"
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏢 Pakai Lokasi UPT (Default)", callback_data="val_DEFAULT")]])
+        prompt += (
+            f"Personel: <code>{target_nip}</code>\n\nMasukkan koordinat dalam format: <code>latitude, longitude</code>"
+        )
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🏢 Pakai Lokasi UPT (Default)", callback_data="val_DEFAULT")]]
+        )
     elif action == "schedule":
         prompt += f"Personel: <code>{target_nip}</code>\n\nPilih preset jam atau ketik manual:"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏰ 07:30 - 16:30 (Default)", callback_data="val_SISTEM")],
-            [InlineKeyboardButton("⌨️ Input Manual", callback_data="val_MANUAL")]
-        ])
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("⏰ 07:30 - 16:30 (Default)", callback_data="val_SISTEM")],
+                [InlineKeyboardButton("⌨️ Input Manual", callback_data="val_MANUAL")],
+            ]
+        )
     elif action == "workdays":
         prompt += f"Personel: <code>{target_nip}</code>\n\nPilih preset hari kerja:"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗓 Senin-Jumat", callback_data="val_mon-fri")],
-            [InlineKeyboardButton("🗓 Senin-Sabtu", callback_data="val_mon-sat")],
-            [InlineKeyboardButton("🗓 Setiap Hari", callback_data="val_everyday")],
-            [InlineKeyboardButton("🌐 Ikuti Global", callback_data="val_GLOBAL")]
-        ])
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("🗓 Senin-Jumat", callback_data="val_mon-fri")],
+                [InlineKeyboardButton("🗓 Senin-Sabtu", callback_data="val_mon-sat")],
+                [InlineKeyboardButton("🗓 Setiap Hari", callback_data="val_everyday")],
+                [InlineKeyboardButton("🌐 Ikuti Global", callback_data="val_GLOBAL")],
+            ]
+        )
     elif action in ["upt", "unit"]:
         upt_list = store.get_all_upts()
         keyboard = get_upt_keyboard(upt_list, callback_prefix="val_")
@@ -144,7 +153,7 @@ async def admin_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     new_value = None
-    
+
     if query:
         await query.answer()
         data = query.data or ""
@@ -152,7 +161,9 @@ async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             new_value = data.replace("val_", "")
             if new_value == "MANUAL":
                 if isinstance(query.message, Message):
-                    await query.message.reply_text("Silakan ketik nilai manual (Format: <code>HH:MM - HH:MM</code>):", parse_mode="HTML")
+                    await query.message.reply_text(
+                        "Silakan ketik nilai manual (Format: <code>HH:MM - HH:MM</code>):", parse_mode="HTML"
+                    )
                 return WAIT_ADMIN_INPUT_VAL
     else:
         if not update.message or not update.message.text:
@@ -184,17 +195,27 @@ async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
 
     target_nip = str(user_cache.get("admin_edit_target", ""))
-    field_map = {"name": "nama", "pass": "password", "nip": "nip", "upt": "upt_id", "loc": "loc", "schedule": "schedule"}
-    
+    field_map = {
+        "name": "nama",
+        "pass": "password",
+        "nip": "nip",
+        "upt": "upt_id",
+        "loc": "loc",
+        "schedule": "schedule",
+    }
+
     success = False
     try:
         if field == "nip":
             success = store.rename_user_nip(target_nip, new_value)
         elif field == "loc":
             if new_value.upper() == "DEFAULT":
-                success = store.update_user_settings(target_nip, {"personal_latitude": None, "personal_longitude": None})
+                success = store.update_user_settings(
+                    target_nip, {"personal_latitude": None, "personal_longitude": None}
+                )
             else:
                 from .conversation_shared import parse_coordinates
+
                 lat, lon = parse_coordinates(new_value)
                 success = store.update_user_settings(target_nip, {"personal_latitude": lat, "personal_longitude": lon})
         elif field == "schedule":
@@ -202,6 +223,7 @@ async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 success = store.update_user_settings(target_nip, {"cron_in": None, "cron_out": None})
             else:
                 from .conversation_shared import parse_schedule_range
+
                 cin, cout = parse_schedule_range(new_value)
                 success = store.update_user_settings(target_nip, {"cron_in": cin, "cron_out": cout})
         elif field == "workdays":
@@ -209,6 +231,7 @@ async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 success = store.update_user_settings(target_nip, {"workdays": None})
             else:
                 from .conversation_shared import parse_workdays
+
                 workdays = parse_workdays(new_value)
                 success = store.update_user_settings(target_nip, {"workdays": workdays})
         else:
@@ -245,6 +268,7 @@ async def admin_confirm_del(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else:
         await update.message.reply_text("❌ Gagal menghapus personel.")
     return ConversationHandler.END
+
 
 async def admin_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_user or not is_admin(update.effective_user.id):
@@ -283,8 +307,7 @@ async def admin_add_pass(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_cache = cast(dict[str, Any], context.user_data)
     user_cache["admin_add_pass"] = update.message.text
     await update.message.reply_text(
-        "👤 <b>NAMA LENGKAP</b>\n────────────────\n"
-        "Password tersimpan. Masukkan <b>NAMA LENGKAP</b> personel ini:",
+        "👤 <b>NAMA LENGKAP</b>\n────────────────\nPassword tersimpan. Masukkan <b>NAMA LENGKAP</b> personel ini:",
         parse_mode="HTML",
     )
     return WAIT_ADMIN_ADD_NAME
@@ -302,7 +325,7 @@ async def admin_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "🏢 <b>LANGKAH 4: UNIT KERJA (UPT)</b>\n────────────────\n"
         "Pilih <b>Unit Kerja</b> tempat personel bertugas dari daftar di bawah:",
         parse_mode="HTML",
-        reply_markup=keyboard
+        reply_markup=keyboard,
     )
     return WAIT_ADMIN_ADD_UPT
 
@@ -310,39 +333,42 @@ async def admin_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def admin_add_upt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_cache = cast(dict[str, Any], context.user_data)
     query = update.callback_query
-    
+
     if query:
         await query.answer()
         data = query.data or ""
         user_cache["admin_add_upt"] = data.replace("add_upt_", "")
     else:
-        if not update.message or not update.message.text: return WAIT_ADMIN_ADD_UPT
+        if not update.message or not update.message.text:
+            return WAIT_ADMIN_ADD_UPT
         user_cache["admin_add_upt"] = update.message.text
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⏰ 07:30 - 16:30 (Default)", callback_data="preset_sch_default")],
-        [InlineKeyboardButton("⌨️ Input Manual", callback_data="preset_sch_manual")]
-    ])
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("⏰ 07:30 - 16:30 (Default)", callback_data="preset_sch_default")],
+            [InlineKeyboardButton("⌨️ Input Manual", callback_data="preset_sch_manual")],
+        ]
+    )
 
     msg_fn = None
     if query and query.message and isinstance(query.message, Message):
         msg_fn = query.message.reply_text
     elif update.message:
         msg_fn = update.message.reply_text
-    
+
     if msg_fn:
         await msg_fn(
-            "⏰ <b>LANGKAH 5: JAM KERJA</b>\n────────────────\n"
-            "Tentukan jam operasional untuk personel ini.",
+            "⏰ <b>LANGKAH 5: JAM KERJA</b>\n────────────────\nTentukan jam operasional untuk personel ini.",
             parse_mode="HTML",
-            reply_markup=keyboard
+            reply_markup=keyboard,
         )
     return WAIT_ADMIN_ADD_SCHEDULE
+
 
 async def admin_add_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_cache = cast(dict[str, Any], context.user_data)
     query = update.callback_query
-    
+
     if query:
         await query.answer()
         data = str(query.data) if query.data else "preset_sch_default"
@@ -353,21 +379,24 @@ async def admin_add_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "⌨️ <b>INPUT JAM MANUAL</b>\n────────────────\n"
                 "Silakan ketik jam kerja dengan format: <code>HH:MM - HH:MM</code>\n"
                 "Contoh: <code>08:00 - 17:00</code>",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
             return WAIT_ADMIN_ADD_SCHEDULE
         else:
             return WAIT_ADMIN_ADD_SCHEDULE
     else:
         # User typed manually
-        if not update.message or not update.message.text: return WAIT_ADMIN_ADD_SCHEDULE
+        if not update.message or not update.message.text:
+            return WAIT_ADMIN_ADD_SCHEDULE
         user_cache["admin_add_schedule"] = update.message.text
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗓 Senin - Jumat", callback_data="preset_wd_mon-fri")],
-        [InlineKeyboardButton("🗓 Senin - Sabtu", callback_data="preset_wd_mon-sat")],
-        [InlineKeyboardButton("🗓 Setiap Hari", callback_data="preset_wd_everyday")]
-    ])
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🗓 Senin - Jumat", callback_data="preset_wd_mon-fri")],
+            [InlineKeyboardButton("🗓 Senin - Sabtu", callback_data="preset_wd_mon-sat")],
+            [InlineKeyboardButton("🗓 Setiap Hari", callback_data="preset_wd_everyday")],
+        ]
+    )
 
     msg_fn = None
     if query and isinstance(query.message, Message):
@@ -380,26 +409,30 @@ async def admin_add_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "🗓 <b>LANGKAH 6: HARI KERJA</b>\n────────────────\n"
             "Pilih hari apa saja personel ini harus melakukan absensi otomatis.",
             parse_mode="HTML",
-            reply_markup=keyboard
+            reply_markup=keyboard,
         )
     return WAIT_ADMIN_ADD_WORKDAYS
+
 
 async def admin_add_workdays(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_cache = cast(dict[str, Any], context.user_data)
     query = update.callback_query
-    
+
     if query:
         await query.answer()
         q_data = query.data or ""
         user_cache["admin_add_workdays"] = q_data.replace("preset_wd_", "")
     else:
-        if not update.message or not update.message.text: return WAIT_ADMIN_ADD_WORKDAYS
+        if not update.message or not update.message.text:
+            return WAIT_ADMIN_ADD_WORKDAYS
         user_cache["admin_add_workdays"] = update.message.text
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏢 Gunakan Lokasi UPT (Default)", callback_data="preset_loc_default")],
-        [InlineKeyboardButton("⌨️ Masukkan Titik Manual", callback_data="preset_loc_manual")]
-    ])
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🏢 Gunakan Lokasi UPT (Default)", callback_data="preset_loc_default")],
+            [InlineKeyboardButton("⌨️ Masukkan Titik Manual", callback_data="preset_loc_manual")],
+        ]
+    )
 
     msg_fn = None
     if query and isinstance(query.message, Message):
@@ -413,14 +446,15 @@ async def admin_add_workdays(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "Di mana personel ini akan melakukan absensi?\n\n"
             "💡 <i>Gunakan lokasi UPT jika personel bekerja di kantor, atau manual jika bekerja remote.</i>",
             parse_mode="HTML",
-            reply_markup=keyboard
+            reply_markup=keyboard,
         )
     return WAIT_ADMIN_ADD_LOC
+
 
 async def admin_add_loc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_cache = cast(dict[str, Any], context.user_data)
     query = update.callback_query
-    
+
     if query:
         await query.answer()
         data = str(query.data) if query.data else ""
@@ -430,39 +464,46 @@ async def admin_add_loc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                     "📍 <b>INPUT KOORDINAT MANUAL</b>\n────────────────\n"
                     "Kirimkan titik koordinat dalam format: <code>lat, lon</code>\n"
                     "Contoh: <code>-6.175, 106.827</code>",
-                    parse_mode="HTML"
+                    parse_mode="HTML",
                 )
             return WAIT_ADMIN_ADD_LOC
         raw_loc = "DEFAULT"
     else:
-        if not update.message or not update.message.text: return WAIT_ADMIN_ADD_LOC
+        if not update.message or not update.message.text:
+            return WAIT_ADMIN_ADD_LOC
         raw_loc = update.message.text
 
     target_nip = user_cache.get("admin_add_nip")
-    
+
     # Process inputs
     raw_schedule = str(user_cache.get("admin_add_schedule", "SISTEM"))
     raw_workdays = str(user_cache.get("admin_add_workdays", "GLOBAL"))
-    
+
     msg_text = update.message.text if update.message else None
     raw_loc = msg_text or "DEFAULT"
-    
-    from .conversation_shared import parse_schedule_range, parse_workdays, parse_coordinates
-    
+
+    from .conversation_shared import parse_coordinates, parse_schedule_range, parse_workdays
+
     cin, cout = (None, None)
     if raw_schedule.upper() != "SISTEM":
-        try: cin, cout = parse_schedule_range(raw_schedule)
-        except: pass
-        
+        try:
+            cin, cout = parse_schedule_range(raw_schedule)
+        except:
+            pass
+
     wday = None
     if raw_workdays.upper() != "GLOBAL":
-        try: wday = parse_workdays(raw_workdays)
-        except: pass
-        
+        try:
+            wday = parse_workdays(raw_workdays)
+        except:
+            pass
+
     lat, lon = (None, None)
     if raw_loc.upper() != "DEFAULT":
-        try: lat, lon = parse_coordinates(raw_loc)
-        except: pass
+        try:
+            lat, lon = parse_coordinates(raw_loc)
+        except:
+            pass
 
     user_data = {
         "nip": target_nip,

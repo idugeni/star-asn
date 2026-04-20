@@ -10,9 +10,11 @@ from star_attendance.core.config import settings
 async def create_queue_pool() -> asyncpg.Pool:
     return await asyncpg.create_pool(
         dsn=settings.POSTGRES_URL,
-        min_size=1,
-        max_size=2,
+        min_size=5,
+        max_size=20,
         max_inactive_connection_lifetime=60,
+        command_timeout=15,
+        statement_cache_size=0,
     )
 
 

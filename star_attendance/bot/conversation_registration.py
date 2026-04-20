@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import Message, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from star_attendance.runtime import get_internal_api_client
-
 from star_attendance.bot.constants import WAIT_REG_NAME, WAIT_REG_NIP, WAIT_REG_PASS, WAIT_REG_UPT
+from star_attendance.runtime import get_internal_api_client
 
 from .conversation_shared import store
 from .ui import get_upt_keyboard
@@ -32,7 +31,7 @@ async def start_reg(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def reg_nip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.message or not update.message.text or not update.effective_user:
         return WAIT_REG_NIP
-    
+
     nip = update.message.text.strip()
     existing = store.get_user_by_nip(nip)
     tid = update.effective_user.id
@@ -46,7 +45,7 @@ async def reg_nip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 parse_mode="HTML",
             )
             return ConversationHandler.END
-        
+
         if not existing.get("telegram_id"):
             await update.message.reply_text(
                 "📢 <b>DATA DITEMUKAN</b>\n────────────────\n"
@@ -87,7 +86,7 @@ async def reg_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return WAIT_REG_NAME
     user_cache = cast(dict[str, Any], context.user_data)
     user_cache["reg_name"] = update.message.text
-    
+
     upt_list = store.get_all_upts()
     keyboard = get_upt_keyboard(upt_list, callback_prefix="reg_upt_")
 
@@ -95,7 +94,7 @@ async def reg_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "🏢 <b>LANGKAH 4/4: UNIT KERJA (UPT)</b>\n────────────────\n"
         "Silakan pilih <b>Unit Kerja</b> tempat Anda bertugas dari daftar di bawah:",
         parse_mode="HTML",
-        reply_markup=keyboard
+        reply_markup=keyboard,
     )
     return WAIT_REG_UPT
 
@@ -103,13 +102,14 @@ async def reg_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def reg_upt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     user_cache = cast(dict[str, Any], context.user_data)
-    
+
     if query:
         await query.answer()
         data = query.data or ""
         user_cache["reg_upt"] = data.replace("reg_upt_", "")
     else:
-        if not update.message or not update.message.text: return WAIT_REG_UPT
+        if not update.message or not update.message.text:
+            return WAIT_REG_UPT
         user_cache["reg_upt"] = update.message.text
 
     if not update.effective_user:

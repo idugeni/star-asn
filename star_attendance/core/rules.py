@@ -1,6 +1,3 @@
-from datetime import timedelta
-
-
 def parse_time_str(value):
     parts = value.split(":")
     hour = int(parts[0]) if parts[0] else 0

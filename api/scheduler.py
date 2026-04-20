@@ -1,16 +1,19 @@
-from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
-from apscheduler.triggers.cron import CronTrigger  # type: ignore
 import logging
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
+from apscheduler.triggers.cron import CronTrigger  # type: ignore
+
 from star_attendance.core.config import settings
-from star_attendance.core.timeutils import format_formal_timestamp
 
 # Import core worker logic
 from star_attendance.core.processor import process_single_user
+from star_attendance.core.timeutils import format_formal_timestamp
 from star_attendance.database_manager import SupabaseManager, get_workday_cron
 
 logger = logging.getLogger("scheduler")
 logger.setLevel(getattr(logging, settings.LOG_LEVEL))
+
 
 class AttendanceScheduler:
     def __init__(self, store: SupabaseManager):
@@ -29,10 +32,10 @@ class AttendanceScheduler:
     async def start(self):
         if not self.scheduler.running:
             self.scheduler.start()
-        
+
         # Initial sync
         await self.sync_user_schedules()
-        
+
         self.is_running = True
         logger.info("Star ASN Enterprise Scheduler Started")
 
@@ -45,7 +48,7 @@ class AttendanceScheduler:
         automation_enabled = bool(db_settings.get("automation_enabled", True))
         users = self.store.get_users_with_passwords() if automation_enabled else []
         logger.info(f"Syncing schedules for {len(users)} users in timezone {scheduler_tz}...")
-        
+
         # Track current jobs to remove stale ones
         current_job_ids = set()
 
@@ -58,11 +61,11 @@ class AttendanceScheduler:
                 )
                 continue
 
-            pin = u['nip']
-            cron_in = u.get('cron_in', '07:00')
-            cron_out = u.get('cron_out', '18:00')
+            pin = u["nip"]
+            cron_in = u.get("cron_in", "07:00")
+            cron_out = u.get("cron_out", "18:00")
             day_of_week = get_workday_cron(u.get("workdays"))
-            
+
             # Setup Personal IN
             job_id_in = f"user_{pin}_in"
             try:
@@ -72,7 +75,7 @@ class AttendanceScheduler:
                     CronTrigger(hour=h, minute=m, day_of_week=day_of_week, timezone=scheduler_tz),
                     args=[u, "in"],
                     id=job_id_in,
-                    replace_existing=True
+                    replace_existing=True,
                 )
                 current_job_ids.add(job_id_in)
             except Exception as e:
@@ -87,7 +90,7 @@ class AttendanceScheduler:
                     CronTrigger(hour=h, minute=m, day_of_week=day_of_week, timezone=scheduler_tz),
                     args=[u, "out"],
                     id=job_id_out,
-                    replace_existing=True
+                    replace_existing=True,
                 )
                 current_job_ids.add(job_id_out)
             except Exception as e:
@@ -98,7 +101,7 @@ class AttendanceScheduler:
                 self.scheduler.remove_job(job.id)
 
         logger.info(f"Schedules synchronized. Total Active Jobs: {len(current_job_ids)}")
-        
+
         # Log Heartbeat to group log
         self.store.add_audit_log(
             nip="SYSTEM",
@@ -119,9 +122,9 @@ class AttendanceScheduler:
         if not db_settings.get("automation_enabled", True):
             logger.info("Skipping scheduler dispatch because automation is disabled.")
             return
-        
+
         # Fresh user data from DB to ensure latest settings/password
-        fresh_user = self.store.get_user_data(user_data['nip'])
+        fresh_user = self.store.get_user_data(user_data["nip"])
         if not fresh_user:
             logger.error(f"Cannot dispatch task: User {user_data['nip']} not found in DB.")
             return
@@ -130,18 +133,20 @@ class AttendanceScheduler:
             def __init__(self, d):
                 for k, v in d.items():
                     setattr(self, k, v)
-        
-        options = Options({
-            "action": action,
-            "explain": True, # Enable process detail tracking
-            "dry_run": False,
-            "source": "scheduler_auto",
-            "store": self.store
-        })
-        
+
+        options = Options(
+            {
+                "action": action,
+                "explain": True,  # Enable process detail tracking
+                "dry_run": False,
+                "source": "scheduler_auto",
+                "store": self.store,
+            }
+        )
+
         # Create a worker task
         logger.info(f"Triggering personal {action.upper()} for {fresh_user['nip']}")
-        
+
         # Define a status callback to send live updates to Telegram
         msg_id_container = {"id": None}
         tid = fresh_user.get("telegram_id")
@@ -150,11 +155,8 @@ class AttendanceScheduler:
             if tid:
                 try:
                     from star_attendance.notifier import notifier
-                    text = (
-                        f"🤖 <b>OTOMASI {action.upper()}</b>\n"
-                        f"────────────────\n"
-                        f"🔄 {status_msg}"
-                    )
+
+                    text = f"🤖 <b>OTOMASI {action.upper()}</b>\n────────────────\n🔄 {status_msg}"
                     if msg_id_container["id"] is None:
                         res = notifier.send_message_sync_get_id(text, to_admin=False, to_group=False)
                         if tid in res:
@@ -164,7 +166,15 @@ class AttendanceScheduler:
                 except Exception as e:
                     logger.warning(f"Failed to send status update to {tid}: {e}")
 
-        await process_single_user(fresh_user, options, 1, 1, is_mass=False, status_callback=status_callback, user_message_id=msg_id_container["id"])
+        await process_single_user(
+            fresh_user,
+            options,
+            1,
+            1,
+            is_mass=False,
+            status_callback=status_callback,
+            user_message_id=msg_id_container["id"],
+        )
 
     def get_jobs(self):
         scheduler_tz = self._resolve_timezone(self.store.get_settings().get("timezone"))
@@ -177,22 +187,24 @@ class AttendanceScheduler:
             parts = job.id.split("_")
             nip = parts[1] if len(parts) >= 3 else None
             action = parts[2] if len(parts) >= 3 else None
-            
+
             next_run_str = "N/A"
             try:
-                if hasattr(job, 'next_run_time') and job.next_run_time:
+                if hasattr(job, "next_run_time") and job.next_run_time:
                     next_run_str = format_formal_timestamp(job.next_run_time.astimezone(scheduler_tz))
             except Exception:
                 pass
 
-            jobs.append({
-                "id": job.id,
-                "nip": nip,
-                "action": action,
-                "next_run": next_run_str,
-                "source": "user_cron",
-                "workdays": job.args[0].get("workdays_label", "-") if getattr(job, "args", None) else "-",
-            })
+            jobs.append(
+                {
+                    "id": job.id,
+                    "nip": nip,
+                    "action": action,
+                    "next_run": next_run_str,
+                    "source": "user_cron",
+                    "workdays": job.args[0].get("workdays_label", "-") if getattr(job, "args", None) else "-",
+                }
+            )
         return jobs
 
     async def restart(self):

@@ -110,9 +110,21 @@ bld/
 
 # === Local Development & Monitoring ===
 tests/
+tools/
+scripts/
+monitoring/
+apply_performance_fixes.py
 deploy.ps1
+publish.ps1
 dev.bat
 run_in.bat
 run_out.bat
+scratch/
 QUICK_START.txt
 DEPLOYMENT_SUMMARY.txt
+AUDIT_UPDATE_ISSUES.md
+FINAL_AUDIT_REPORT.md
+
+# === Archived Notes ===
+notes/
+

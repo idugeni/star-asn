@@ -1,9 +1,11 @@
 from enum import Enum
 
+
 class UserRole(str, Enum):
     admin = "admin"
     user = "user"
     system = "system"
+
 
 class AuditStatus(str, Enum):
     success = "success"
@@ -12,6 +14,7 @@ class AuditStatus(str, Enum):
     pending = "pending"
     skipped = "skipped"
     ok = "ok"
+
 
 class AuditAction(str, Enum):
     login = "login"
@@ -30,10 +33,12 @@ class AuditAction(str, Enum):
     out = "out"
     other = "other"
 
+
 class RuleMode(str, Enum):
     smart = "smart"
     manual = "manual"
     hybrid = "hybrid"
+
 
 class WorkdayPreset(str, Enum):
     mon_fri = "mon-fri"

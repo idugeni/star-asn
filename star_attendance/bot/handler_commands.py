@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any
 
 from telegram import Update, constants
 from telegram.ext import ContextTypes
 
 from star_attendance.core.config import settings
 from star_attendance.core.processor import process_single_user
-
 
 MenuBuilder = Callable[[int], Awaitable[Any]]
 AdminChecker = Callable[[int], bool]
@@ -182,7 +182,9 @@ async def manage_nip(
 
     args = context.args or []
     if len(args) < 2:
-        await update.message.reply_text("💡 <b>Update NIP</b>\n<code>/nip [LAMA] [BARU]</code>", parse_mode=constants.ParseMode.HTML)
+        await update.message.reply_text(
+            "💡 <b>Update NIP</b>\n<code>/nip [LAMA] [BARU]</code>", parse_mode=constants.ParseMode.HTML
+        )
         return
 
     if store.rename_user_nip(args[0], args[1]):
@@ -206,11 +208,15 @@ async def manage_pass(
 
     args = context.args or []
     if len(args) < 2:
-        await update.message.reply_text("💡 <b>Update Password</b>\n<code>/pass [NIP] [PWD]</code>", parse_mode=constants.ParseMode.HTML)
+        await update.message.reply_text(
+            "💡 <b>Update Password</b>\n<code>/pass [NIP] [PWD]</code>", parse_mode=constants.ParseMode.HTML
+        )
         return
 
     if store.update_user_settings(args[0], {"password": args[1]}):
-        await update.message.reply_text(f"✅ Password <code>{args[0]}</code> diperbarui.", parse_mode=constants.ParseMode.HTML)
+        await update.message.reply_text(
+            f"✅ Password <code>{args[0]}</code> diperbarui.", parse_mode=constants.ParseMode.HTML
+        )
     else:
         await update.message.reply_text("❌ Gagal update password.")
 
@@ -227,7 +233,9 @@ async def manage_hapus(
 
     args = context.args or []
     if not args:
-        await update.message.reply_text("💡 <b>Hapus User</b>\n<code>/hapus [NIP]</code>", parse_mode=constants.ParseMode.HTML)
+        await update.message.reply_text(
+            "💡 <b>Hapus User</b>\n<code>/hapus [NIP]</code>", parse_mode=constants.ParseMode.HTML
+        )
         return
 
     if store.delete_user(args[0]):
@@ -257,8 +265,8 @@ async def profil_command(
         else "DEFAULT UPT"
     )
     auto_status = "ACTIVE" if user.get("auto_attendance_active") else "INACTIVE"
-    in_source = str(user.get('cron_in_source', '-')).upper()
-    out_source = str(user.get('cron_out_source', '-')).upper()
+    in_source = str(user.get("cron_in_source", "-")).upper()
+    out_source = str(user.get("cron_out_source", "-")).upper()
     in_label = f" ({in_source})" if in_source != "PERSONAL" else ""
     out_label = f" ({out_source})" if out_source != "PERSONAL" else ""
 
@@ -295,7 +303,9 @@ async def manage_name(
 
     args = context.args or []
     if len(args) < 2:
-        await update.message.reply_text("💡 <b>Update Nama</b>\n<code>/nama [NIP] [NAMA BARU]</code>", parse_mode=constants.ParseMode.HTML)
+        await update.message.reply_text(
+            "💡 <b>Update Nama</b>\n<code>/nama [NIP] [NAMA BARU]</code>", parse_mode=constants.ParseMode.HTML
+        )
         return
 
     new_name = " ".join(args[1:])
@@ -320,7 +330,9 @@ async def manage_upt(
 
     args = context.args or []
     if len(args) < 2:
-        await update.message.reply_text("💡 <b>Update UPT</b>\n<code>/upt [NIP] [ID/NAMA UPT]</code>", parse_mode=constants.ParseMode.HTML)
+        await update.message.reply_text(
+            "💡 <b>Update UPT</b>\n<code>/upt [NIP] [ID/NAMA UPT]</code>", parse_mode=constants.ParseMode.HTML
+        )
         return
 
     new_upt = " ".join(args[1:])

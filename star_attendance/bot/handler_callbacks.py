@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Mapping, cast
+from typing import Any, cast
 
 import psutil
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update, constants
@@ -24,7 +24,6 @@ from .handler_views import (
     get_global_settings_keyboard,
     get_scheduler_keyboard,
 )
-
 
 EditMessage = Callable[[Message, str, Any], Awaitable[None]]
 MainMenuBuilder = Callable[[int], Awaitable[Any]]
@@ -103,9 +102,9 @@ async def _show_profile(message: Message, *, services: CallbackServices, tid: in
         else "NOT SET"
     )
     auto_status = "ACTIVE" if user.get("auto_attendance_active") else "INACTIVE"
-    in_source = str(user.get('cron_in_source', '-')).upper()
-    out_source = str(user.get('cron_out_source', '-')).upper()
-    
+    in_source = str(user.get("cron_in_source", "-")).upper()
+    out_source = str(user.get("cron_out_source", "-")).upper()
+
     # Remove (PERSONAL) label if source is personal
     in_label = f" ({in_source})" if in_source != "PERSONAL" else ""
     out_label = f" ({out_source})" if out_source != "PERSONAL" else ""
@@ -134,19 +133,14 @@ async def _show_profile(message: Message, *, services: CallbackServices, tid: in
 async def _show_scheduler(message: Message, *, services: CallbackServices, restart: bool = False) -> None:
     try:
         payload = await (
-            services.internal_api.restart_scheduler()
-            if restart
-            else services.internal_api.get_scheduler_status()
+            services.internal_api.restart_scheduler() if restart else services.internal_api.get_scheduler_status()
         )
         response = build_scheduler_message(payload)
         if restart:
             response = "♻️ <b>SCHEDULER DIRESTART</b>\n────────────────\n" + response
     except Exception as exc:
         action = "restart scheduler" if restart else "mengambil status scheduler"
-        response = (
-            "<b>🕒 SCHEDULER INTERNAL</b>\n────────────────\n"
-            f"❌ Gagal {action}.\n<code>{exc}</code>"
-        )
+        response = f"<b>🕒 SCHEDULER INTERNAL</b>\n────────────────\n❌ Gagal {action}.\n<code>{exc}</code>"
     await services.edit_message(message, response, get_scheduler_keyboard())
 
 
@@ -236,7 +230,11 @@ async def _show_manage_user(message: Message, *, services: CallbackServices, tid
         return
 
     loc_indicator = "📍 (Real)" if user.get("location_source") == "personal" else "🌐 (Default)"
-    sched_indicator = "⏰ (Custom)" if user.get("cron_in_source") == "personal" or user.get("cron_out_source") == "personal" else "🗓 (Sistem)"
+    sched_indicator = (
+        "⏰ (Custom)"
+        if user.get("cron_in_source") == "personal" or user.get("cron_out_source") == "personal"
+        else "🗓 (Sistem)"
+    )
     work_indicator = "🗓 (Custom)" if user.get("workdays_source") == "personal" else "🌍 (Global)"
 
     response = (
@@ -311,7 +309,9 @@ async def _trigger_single_action(
 
     user = services.store.get_user_by_nip(target_nip)
     if not user:
-        await services.edit_message(message, "❌ Personel tidak ditemukan.", InlineKeyboardMarkup([[get_back_button()]]))
+        await services.edit_message(
+            message, "❌ Personel tidak ditemukan.", InlineKeyboardMarkup([[get_back_button()]])
+        )
         return
 
     # 1. Send initial processing message
@@ -331,6 +331,7 @@ async def _trigger_single_action(
             self.request_key = str(uuid.uuid4())
 
     import uuid
+
     options = Options(action, services.store)
 
     # 3. Process in background and update UI on completion
@@ -338,27 +339,28 @@ async def _trigger_single_action(
         try:
             # We use process_single_user directly for immediate result
             success, result_msg = await process_single_user(
-                user, options, 1, 1, is_mass=False, 
-                user_message_id=sent_msg.message_id
+                user, options, 1, 1, is_mass=False, user_message_id=sent_msg.message_id
             )
-            
+
             # The result_msg from process_single_user is already formatted for Telegram
             if result_msg:
                 # Add a back button to the result
-                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu User", callback_data=f"manage_user_{target_nip}")]])
+                keyboard = InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("◀️ Kembali ke Menu User", callback_data=f"manage_user_{target_nip}")]]
+                )
                 await services.edit_message(sent_msg, result_msg, keyboard)
             else:
                 status = "BERHASIL" if success else "GAGAL"
                 await services.edit_message(
-                    sent_msg, 
+                    sent_msg,
                     f"✅ <b>ABSENSI SELESAI ({status})</b>\nSila cek log untuk detail lengkap.",
-                    InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data=f"manage_user_{target_nip}")]])
+                    InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("◀️ Kembali", callback_data=f"manage_user_{target_nip}")]]
+                    ),
                 )
         except Exception as exc:
             await services.edit_message(
-                sent_msg,
-                f"❌ <b>SISTEM ERROR</b>\n<code>{exc}</code>",
-                InlineKeyboardMarkup([[get_back_button()]])
+                sent_msg, f"❌ <b>SISTEM ERROR</b>\n<code>{exc}</code>", InlineKeyboardMarkup([[get_back_button()]])
             )
 
     asyncio.create_task(run_and_update())
@@ -383,7 +385,9 @@ async def handle_callback(
         return
     if data == "main_menu":
         user = services.store.get_user_by_telegram_id(tid)
-        await services.edit_message(message, build_dashboard_message(user, store=services.store), await services.get_main_menu(tid))
+        await services.edit_message(
+            message, build_dashboard_message(user, store=services.store), await services.get_main_menu(tid)
+        )
         return
     if data == "start_settings_menu":
         await services.edit_message(
@@ -418,7 +422,9 @@ async def handle_callback(
     if data == "view_global_settings":
         if not services.is_admin(tid):
             return
-        await services.edit_message(message, build_global_settings_message(store=services.store), get_global_settings_keyboard())
+        await services.edit_message(
+            message, build_global_settings_message(store=services.store), get_global_settings_keyboard()
+        )
         return
     if data == "view_scheduler":
         if not services.is_admin(tid):
@@ -446,10 +452,14 @@ async def handle_callback(
         await _show_manage_user(message, services=services, tid=tid, target_nip=data.replace("manage_user_", ""))
         return
     if data.startswith("force_in_"):
-        await _trigger_single_action(message, services=services, tid=tid, target_nip=data.replace("force_in_", ""), action="in")
+        await _trigger_single_action(
+            message, services=services, tid=tid, target_nip=data.replace("force_in_", ""), action="in"
+        )
         return
     if data.startswith("force_out_"):
-        await _trigger_single_action(message, services=services, tid=tid, target_nip=data.replace("force_out_", ""), action="out")
+        await _trigger_single_action(
+            message, services=services, tid=tid, target_nip=data.replace("force_out_", ""), action="out"
+        )
         return
     if data in {"trigger_in", "trigger_out"}:
         await _trigger_mass_action(message, context, services=services, tid=tid, action=cast(str, data).split("_")[1])

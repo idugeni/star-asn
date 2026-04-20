@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from star_attendance.db.types import UserData
 
-from telegram import (
-    KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, constants
-)
+from telegram import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, constants
 from telegram.ext import ContextTypes, ConversationHandler
 
 from star_attendance.bot.constants import WAIT_SET_DAYS, WAIT_SET_IN, WAIT_SET_LOC, WAIT_SET_OUT
@@ -16,7 +14,6 @@ from star_attendance.bot.ui import get_main_menu
 from star_attendance.runtime import get_internal_api_client
 
 from .conversation_shared import parse_workdays, store, validate_time_text
-
 
 internal_api = get_internal_api_client()
 WORKDAY_OPTIONS = [["Senin-Jumat"], ["Senin-Sabtu"], ["Setiap Hari"], ["❌ Batal"]]
@@ -65,8 +62,7 @@ async def start_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
 
     await message.reply_text(
-        "🛠 <b>KONFIGURASI JADWAL</b>\n────────────────\n"
-        "Pilih atau ketik jam <b>AUTO-IN</b> Anda (Format HH:mm):",
+        "🛠 <b>KONFIGURASI JADWAL</b>\n────────────────\nPilih atau ketik jam <b>AUTO-IN</b> Anda (Format HH:mm):",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(IN_TIME_OPTIONS, one_time_keyboard=True, resize_keyboard=True),
     )
@@ -83,8 +79,7 @@ async def start_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
 
     await message.reply_text(
-        "⏰ <b>PENGATURAN JADWAL CEPAT</b>\n────────────────\n"
-        "Pilih atau ketik jam <b>AUTO-IN</b> baru Anda:",
+        "⏰ <b>PENGATURAN JADWAL CEPAT</b>\n────────────────\nPilih atau ketik jam <b>AUTO-IN</b> baru Anda:",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(IN_TIME_OPTIONS, one_time_keyboard=True, resize_keyboard=True),
     )
@@ -101,8 +96,7 @@ async def start_workdays(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
 
     await message.reply_text(
-        "🗓 <b>PILIH POLA HARI AUTO ABSEN</b>\n────────────────\n"
-        "Pilih hari kerja yang akan dipakai untuk auto absen:",
+        "🗓 <b>PILIH POLA HARI AUTO ABSEN</b>\n────────────────\nPilih hari kerja yang akan dipakai untuk auto absen:",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(WORKDAY_OPTIONS, one_time_keyboard=True, resize_keyboard=True),
     )
@@ -114,10 +108,11 @@ async def start_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if query:
         await query.answer()
 
-    keyboard = ReplyKeyboardMarkup([
-        [KeyboardButton("📍 Ambil Lokasi Saya Sekarang", request_location=True)],
-        [KeyboardButton("❌ Batal")]
-    ], resize_keyboard=True, one_time_keyboard=True)
+    keyboard = ReplyKeyboardMarkup(
+        [[KeyboardButton("📍 Ambil Lokasi Saya Sekarang", request_location=True)], [KeyboardButton("❌ Batal")]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
     message = (
         "📍 <b>PENGATURAN LOKASI GPS</b>\n────────────────\n"
@@ -139,11 +134,11 @@ async def start_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def set_in(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.message or not update.message.text:
         return WAIT_SET_IN
-        
+
     text = update.message.text.strip()
     if text == "❌ Batal":
         return await cancel_convo(update, context)
-        
+
     try:
         normalized = validate_time_text(text)
     except ValueError as exc:
@@ -153,8 +148,7 @@ async def set_in(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_cache = cast(dict[str, Any], context.user_data)
     user_cache["set_in"] = normalized
     await update.message.reply_text(
-        "✅ Jam <b>IN</b> tersimpan.\n\n"
-        "Sekarang pilih atau ketik jam <b>AUTO-OUT (Pulang)</b> Anda:",
+        "✅ Jam <b>IN</b> tersimpan.\n\nSekarang pilih atau ketik jam <b>AUTO-OUT (Pulang)</b> Anda:",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(OUT_TIME_OPTIONS, one_time_keyboard=True, resize_keyboard=True),
     )
@@ -164,11 +158,11 @@ async def set_in(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def set_out(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.message or not update.message.text:
         return WAIT_SET_OUT
-        
+
     text = update.message.text.strip()
     if text == "❌ Batal":
         return await cancel_convo(update, context)
-        
+
     try:
         normalized = validate_time_text(text)
     except ValueError as exc:
@@ -179,8 +173,7 @@ async def set_out(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_cache["set_out"] = normalized
 
     await update.message.reply_text(
-        "🗓 <b>PILIH HARI AUTO ABSEN</b>\n────────────────\n"
-        "Pilih pola hari kerja untuk auto absen Anda:",
+        "🗓 <b>PILIH HARI AUTO ABSEN</b>\n────────────────\nPilih pola hari kerja untuk auto absen Anda:",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(WORKDAY_OPTIONS, one_time_keyboard=True, resize_keyboard=True),
     )
@@ -190,7 +183,7 @@ async def set_out(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def set_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.message or not update.message.text:
         return WAIT_SET_DAYS
-        
+
     text = update.message.text.strip()
     if text == "❌ Batal":
         return await cancel_convo(update, context)

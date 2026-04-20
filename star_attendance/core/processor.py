@@ -1,20 +1,25 @@
 import asyncio
 import time
 import uuid
-from collections.abc import Mapping
-from typing import Optional, Callable, Coroutine, Any
+from collections.abc import Callable, Coroutine, Mapping
+from typing import Any
+
 from colorama import Fore, Style
 
-from star_attendance.runtime import get_store
-from star_attendance.notifier import notifier
-from star_attendance.core.utils import (
-    set_context, clear_context, log, info, warning, error, step,
-    print_sync, info_with_header, format_user_info
-)
-from star_attendance.core.rules import check_in_rules, check_out_rules
-from star_attendance.core.engine import AttendanceSimulator
 from star_attendance.core.config import settings
+from star_attendance.core.engine import AttendanceEngine
+from star_attendance.core.utils import (
+    clear_context,
+    format_user_info,
+    info_with_header,
+    log,
+    print_sync,
+    set_context,
+    warning,
+)
+from star_attendance.notifier import notifier
 from star_attendance.queueing import create_queue_pool, encode_queue_payload, require_queue_schema
+from star_attendance.runtime import get_store
 
 
 def _safe_last_success_record(store: Any, nip: str, action: str) -> tuple[Any | None, str | None]:
@@ -27,13 +32,21 @@ def _safe_last_success_record(store: Any, nip: str, action: str) -> tuple[Any | 
     return None, None
 
 
-async def process_single_user(user, options, position, total, is_mass=True, status_callback: Optional[Callable[[str], Coroutine[Any, Any, None]]] = None, user_message_id: Optional[int | dict[str, Any]] = None):
-    nip = user['nip']
+async def process_single_user(
+    user,
+    options,
+    position,
+    total,
+    is_mass=True,
+    status_callback: Callable[[str], Coroutine[Any, Any, None]] | None = None,
+    user_message_id: int | dict[str, Any] | None = None,
+):
+    nip = user["nip"]
     action = options.action.lower()
     scope = action.upper()
     store = options.store if getattr(options, "store", None) else get_store()
     source = str(getattr(options, "source", None) or ("mass_worker" if is_mass else "api_manual"))
-    request_key = str(uuid.uuid4())
+    request_key = str(getattr(options, "request_key", None) or uuid.uuid4())
     header: str | None = None
     full_msg: str | None = None
     raw_user_data = store.get_user_data(nip)
@@ -50,7 +63,8 @@ async def process_single_user(user, options, position, total, is_mass=True, stat
         header = format_user_info(name, nip, upt, location)
         set_context(nip)
         info_with_header(
-            header, f"event=start action={action} position={position} total={total} nip={nip}", scope=scope)
+            header, f"event=start action={action} position={position} total={total} nip={nip}", scope=scope
+        )
     else:
         log("INFO", f"event=start action={action} position={position} total={total} nip={nip}", scope=scope)
 
@@ -60,15 +74,15 @@ async def process_single_user(user, options, position, total, is_mass=True, stat
     retry_delay = float(settings.MASS_RETRY_DELAY)
     attempt = 0
     result = False
-    last_error: Optional[str] = None
+    last_error: str | None = None
     acquired_lock = False
 
-    simulator = AttendanceSimulator(action=action, nip=nip, status_callback=status_callback)
+    engine = AttendanceEngine(action=action, nip=nip, status_callback=status_callback)
     try:
         if store.has_successful_attendance_today(nip, action):
             recorded_at, _ = _safe_last_success_record(store, nip, action)
             store.add_audit_log(nip, action, "skipped", "Attendance already recorded successfully today.")
-            
+
             # Formatted message for Admin/Logs
             full_msg = notifier.format_attendance_msg(
                 nip,
@@ -84,7 +98,10 @@ async def process_single_user(user, options, position, total, is_mass=True, stat
             # Send notification to User if they have a Telegram ID
             if user_chat_id:
                 notifier.notify_attendance(
-                    nip, actual_name, action, "skipped",
+                    nip,
+                    actual_name,
+                    action,
+                    "skipped",
                     duration=0,
                     to_group=False,
                     to_admin=False,
@@ -94,10 +111,12 @@ async def process_single_user(user, options, position, total, is_mass=True, stat
                         "recorded_at": recorded_at,
                         "event_time": recorded_at,
                         "action": action,
-                        "detail": f"Anda sudah melakukan {action.upper()} hari ini pada pukul {recorded_at.strftime('%H:%M:%S')}." if recorded_at else "Sudah tercatat."
-                    }
+                        "detail": f"Anda sudah melakukan {action.upper()} hari ini pada pukul {recorded_at.strftime('%H:%M:%S')}."
+                        if recorded_at
+                        else "Sudah tercatat.",
+                    },
                 )
-            
+
             return False, full_msg
 
         acquired_lock = store.acquire_attendance_lock(nip, action, request_key, source)
@@ -119,7 +138,7 @@ async def process_single_user(user, options, position, total, is_mass=True, stat
             attempt += 1
             try:
                 password = user.get("password")
-                login_res = await simulator.switch_user(nip, password=str(password) if password else "")
+                login_res = await engine.switch_user(nip, password=str(password) if password else "")
                 if login_res == "COMPLETED":
                     # Action already done in browser during WAF bridge
                     result = True
@@ -136,27 +155,32 @@ async def process_single_user(user, options, position, total, is_mass=True, stat
                     result = False
                     break
                 elif login_res is True:
-                    result = await simulator.execute_attendance(is_mass=is_mass, show_info=False)
+                    result = await engine.execute_attendance(is_mass=is_mass, show_info=False)
                     if result:
                         last_error = ""
                     else:
                         last_error = str(last_error) if last_error else "Attendance submission failed"
                 else:
-                    last_error = str(login_res) if login_res else "Login gagal atau password tidak ditemukan"
+                    if isinstance(login_res, dict):
+                        last_error = login_res.get("message") or login_res.get("status") or str(login_res)
+                    else:
+                        last_error = str(login_res) if login_res else "Login gagal atau password tidak ditemukan"
+
                     store.add_audit_log(nip, action, "failed", last_error)
                     result = False
             except Exception as e:
-                error(f"Attempt {attempt} failed: {e}", scope=scope)
+                log("INFO", f"Attempt {attempt} failed: {e}", scope=scope)
                 last_error = str(e)
                 result = False
 
             if result is not True and attempt < retry_max:
-                log("WARN", f"event=retry action={action} attempt={attempt} max={retry_max}", scope=scope)
+                # Use INFO for retry messages
+                log("INFO", f"event=retry action={action} attempt={attempt} max={retry_max}", scope=scope)
                 await asyncio.sleep(retry_delay)
     finally:
         if acquired_lock:
             store.release_attendance_lock(request_key)
-        await simulator.client.close()
+        await engine.client.close()
         if is_mass:
             print_sync(f"{Fore.CYAN}{'-' * 60}{Style.RESET_ALL}")
             clear_context()
@@ -166,26 +190,26 @@ async def process_single_user(user, options, position, total, is_mass=True, stat
 
     should_notify = result or not is_mass or source == "scheduler_auto"
     if should_notify:
-        actual_name = str(simulator.user_info.get("nama") or actual_name)
+        actual_name = str(engine.user_info.get("nama") or actual_name)
         recorded_at = None
         if result:
             recorded_at, _ = _safe_last_success_record(store, nip, action)
 
         debug_data = {
             "action": action,
-            "session_source": getattr(simulator, "last_session_source", "NEW"),
-            "attempts": getattr(simulator, "last_attempts", 1),
-            "captcha_code": getattr(simulator, "last_captcha", "N/A"),
-            "waf_status": getattr(simulator, "last_waf_status", "ACTIVE"),
-            "public_ip": getattr(simulator, "last_public_ip", "N/A"),
-            "user_agent": getattr(simulator, "last_user_agent", "N/A"),
+            "session_source": getattr(engine, "last_session_source", "NEW"),
+            "attempts": getattr(engine, "last_attempts", 1),
+            "captcha_code": getattr(engine, "last_captcha", "N/A"),
+            "waf_status": getattr(engine, "last_waf_status", "ACTIVE"),
+            "public_ip": getattr(engine, "last_public_ip", "N/A"),
+            "user_agent": getattr(engine, "last_user_agent", "N/A"),
             "source": source,
             "request_key": request_key,
             "recorded_at": recorded_at,
             "event_time": recorded_at,
             "detail": str(last_error) if not result else None,
             "telegram_id": user_chat_id,
-            "logs": getattr(simulator, "_accumulated_logs", []),
+            "logs": getattr(engine, "_accumulated_logs", []),
         }
 
         full_msg = notifier.format_attendance_msg(
@@ -205,11 +229,14 @@ async def process_single_user(user, options, position, total, is_mass=True, stat
         final_msg_id = user_message_id.get("id") if isinstance(user_message_id, dict) else user_message_id
 
         notifier.notify_attendance(
-            nip, actual_name, action, "success" if result else "failed",
+            nip,
+            actual_name,
+            action,
+            "success" if result else "failed",
             duration=elapsed,
             to_group=True,
             to_admin=False,
-            to_user=bool(user_chat_id), # Always notify user if they are registered in bot
+            to_user=bool(user_chat_id),  # Always notify user if they are registered in bot
             user_chat_id=user_chat_id,
             user_message_id=final_msg_id,
             debug_data=debug_data,
@@ -262,6 +289,7 @@ async def mass_attendance(limit=None, options=None):
 
     # --- "MASTER OF MASTER" PRIMING ---
     from star_attendance.login_handler import LoginHandler
+
     await LoginHandler.prime_waf_globally()
 
     pool = await create_queue_pool()
@@ -275,15 +303,17 @@ async def mass_attendance(limit=None, options=None):
                 warning(f"event=mass_abort action={action} message='Dispatch halted by stop signal'", scope=scope)
                 break
 
-            batch = users[start:start + batch_size]
+            batch = users[start : start + batch_size]
             entrypoints = ["attendance.process"] * len(batch)
             payloads = [
-                encode_queue_payload({
-                    "nip": user["nip"],
-                    "action": action,
-                    "request_key": str(uuid.uuid4()),
-                    "source": "mass_dispatch",
-                })
+                encode_queue_payload(
+                    {
+                        "nip": user["nip"],
+                        "action": action,
+                        "request_key": str(uuid.uuid4()),
+                        "source": "mass_dispatch",
+                    }
+                )
                 for user in batch
             ]
             priorities = [0] * len(batch)
@@ -297,16 +327,18 @@ async def mass_attendance(limit=None, options=None):
                 "pos": str(count),
                 "total": str(len(users)),
                 "last_nip": batch[-1]["nip"],
-                "start_time": str(mass_start)
+                "start_time": str(mass_start),
             }
             store.update_mass_status(status_data)
     finally:
-        store.update_mass_status({
-            "active": "0",
-            "action": action,
-            "pos": str(count),
-            "total": str(len(users)),
-        })
+        store.update_mass_status(
+            {
+                "active": "0",
+                "action": action,
+                "pos": str(count),
+                "total": str(len(users)),
+            }
+        )
         await pool.close()
 
     # Log mass orchestration summary to audit log
@@ -314,9 +346,10 @@ async def mass_attendance(limit=None, options=None):
         nip="SYSTEM",
         action=f"mass_{action}",
         status="ok",
-        message=f"Mass {action.upper()} Dispatched. Total Personnel: {count} workers enqueued."
+        message=f"Mass {action.upper()} Dispatched. Total Personnel: {count} workers enqueued.",
     )
 
     print_sync(
-        f"\n{Fore.GREEN}[SUCCESS] Postgres dispatch complete. Workers are processing independently.{Style.RESET_ALL}\n")
+        f"\n{Fore.GREEN}[SUCCESS] Postgres dispatch complete. Workers are processing independently.{Style.RESET_ALL}\n"
+    )
     return {"queued": count}

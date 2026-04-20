@@ -1,9 +1,12 @@
+from contextlib import asynccontextmanager, contextmanager
+
 from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from contextlib import contextmanager, asynccontextmanager
+
 from star_attendance.core.config import settings
 from star_attendance.db.models import Base
+
 
 class DBManager:
     def __init__(self):

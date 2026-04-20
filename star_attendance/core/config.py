@@ -1,4 +1,3 @@
-from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,17 +6,14 @@ class Settings(BaseSettings):
     Type-Safe Centralized Configuration for Star ASN.
     Validates environment variables at start-up.
     """
-    model_config = SettingsConfigDict(
-        env_file=".env", 
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # --- TELEGRAM BOT CONFIGURATION ---
-    TELEGRAM_BOT_TOKEN: Optional[str] = None
-    TELEGRAM_ADMIN_ID: Optional[int] = None
-    TELEGRAM_LOG_GROUP_ID: Optional[str] = None
-    MINI_APP_URL: Optional[str] = None
+    TELEGRAM_BOT_TOKEN: str | None = None
+    TELEGRAM_ADMIN_ID: int | None = None
+    TELEGRAM_LOG_GROUP_ID: str | None = None
+    MINI_APP_URL: str | None = None
 
     # --- SUPABASE DATABASE CONFIGURATION ---
     POSTGRES_URL: str
@@ -41,7 +37,7 @@ class Settings(BaseSettings):
 
     # --- API CONFIGURATION ---
     INTERNAL_API_URL: str = "http://127.0.0.1:8000"
-    INTERNAL_API_TOKEN: Optional[str] = None
+    INTERNAL_API_TOKEN: str | None = None
 
     # --- BROWSER SETTINGS ---
     WAF_BROWSER_HEADLESS: bool = True
@@ -56,7 +52,7 @@ class Settings(BaseSettings):
     BOT_NAME: str = "STAR-ASN"
     BOT_EDITION: str = "ENTERPRISE PREMIUM"
     BOT_VERSION: str = "2.0"
-    BOT_BANNER_PATH: Optional[str] = "assets/banner.png"
+    BOT_BANNER_PATH: str | None = "assets/banner.png"
     BOT_BROADCAST_DELAY: float = 0.05
     UPT_EXAMPLE_FALLBACK: str = "KANWIL_SUMUT, KANIM_MEDAN"
 

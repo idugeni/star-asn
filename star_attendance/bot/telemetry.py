@@ -1,9 +1,10 @@
-import time
 import asyncio
+import time
+
 from telegram import constants
 from telegram.ext import ContextTypes
 
-from star_attendance.bot.ui import get_progress_bar, get_main_menu
+from star_attendance.bot.ui import get_main_menu, get_progress_bar
 from star_attendance.runtime import get_store
 
 store = get_store()
@@ -26,14 +27,16 @@ async def monitor_mass_progress(context: ContextTypes.DEFAULT_TYPE, chat_id, mes
                 await asyncio.sleep(1)
                 continue
 
-            final_msg = f"✅ <b>MASS {action.upper()} COMPLETED</b>\n────────────────\nStatus: <code>SUCCESSFUL_SHUTDOWN</code>"
+            final_msg = (
+                f"✅ <b>MASS {action.upper()} COMPLETED</b>\n────────────────\nStatus: <code>SUCCESSFUL_SHUTDOWN</code>"
+            )
             try:
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=final_msg,
                     reply_markup=await get_main_menu(telegram_id),
-                    parse_mode=constants.ParseMode.HTML
+                    parse_mode=constants.ParseMode.HTML,
                 )
             except Exception:
                 pass
@@ -56,10 +59,7 @@ async def monitor_mass_progress(context: ContextTypes.DEFAULT_TYPE, chat_id, mes
         if msg != last_text:
             try:
                 await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    text=msg,
-                    parse_mode=constants.ParseMode.HTML
+                    chat_id=chat_id, message_id=message_id, text=msg, parse_mode=constants.ParseMode.HTML
                 )
                 last_text = msg
             except Exception:

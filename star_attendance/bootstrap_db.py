@@ -1,9 +1,9 @@
 import asyncio
 import logging
 
+from star_attendance.core.utils import success
 from star_attendance.db.bootstrap import apply_pending_migrations, verify_runtime_schema
 from star_attendance.queueing import create_queue_pool, install_queue_schema, require_queue_schema
-
 
 logger = logging.getLogger("bootstrap_db")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -27,6 +27,7 @@ async def bootstrap_database() -> None:
 
     verify_runtime_schema(require_pgqueuer=True)
     logger.info("Database bootstrap verification complete.")
+    success("Star ASN System Online - Database Priming Complete", scope="BOOTSTRAP")
 
 
 def main() -> None:

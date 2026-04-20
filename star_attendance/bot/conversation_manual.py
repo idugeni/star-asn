@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -57,7 +57,10 @@ async def man_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if not user or not isinstance(query.message, Message):
         return ConversationHandler.END
 
-    await query.message.edit_text(f"<b>🤖 OTOMASI {action.upper()}</b>\n────────────────\n⏳ Mengeksekusi manual {action.upper()}...", parse_mode="HTML")
+    await query.message.edit_text(
+        f"<b>🤖 OTOMASI {action.upper()}</b>\n────────────────\n⏳ Mengeksekusi manual {action.upper()}...",
+        parse_mode="HTML",
+    )
     status_message = query.message
     msg_id_container = {"id": status_message.message_id}
     last_status = [f"⏳ Mengeksekusi manual {action.upper()}..."]
@@ -87,8 +90,7 @@ async def man_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
     except Exception as exc:
         await status_message.edit_text(
-            "❌ <b>EKSEKUSI MANUAL GAGAL</b>\n────────────────\n"
-            f"<code>{exc}</code>",
+            f"❌ <b>EKSEKUSI MANUAL GAGAL</b>\n────────────────\n<code>{exc}</code>",
             parse_mode="HTML",
         )
         return ConversationHandler.END

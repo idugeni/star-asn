@@ -1,15 +1,16 @@
 import html
-import os
 import queue
 import threading
-import psutil
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
+import psutil
 import requests
+
 from star_attendance.core.config import settings
 from star_attendance.core.timeutils import format_formal_timestamp, format_precise_time
+
 
 def _as_datetime(value: Any) -> datetime | None:
     return value if isinstance(value, datetime) else None
@@ -62,7 +63,7 @@ class TelegramNotifier:
         self.log_group_id = settings.TELEGRAM_LOG_GROUP_ID
         self.is_active = bool(self.token)
         self.session = requests.Session()
-        self._queue: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=1000)
+        self._queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1000)
         self._worker = threading.Thread(target=self._dispatch_worker, daemon=True)
         self._worker.start()
 
@@ -102,12 +103,7 @@ class TelegramNotifier:
         if not self.is_active:
             return False
         url = f"https://api.telegram.org/bot{self.token}/editMessageText"
-        payload = {
-            "chat_id": str(chat_id),
-            "message_id": message_id,
-            "text": new_text,
-            "parse_mode": "HTML"
-        }
+        payload = {"chat_id": str(chat_id), "message_id": message_id, "text": new_text, "parse_mode": "HTML"}
         try:
             response = self.session.post(url, json=payload, timeout=10)
             return response.status_code == 200
@@ -131,10 +127,12 @@ class TelegramNotifier:
         if not self.is_active:
             return False
         try:
-            self._queue.put_nowait({
-                "message": message,
-                "chat_ids": list(chat_ids),
-            })
+            self._queue.put_nowait(
+                {
+                    "message": message,
+                    "chat_ids": list(chat_ids),
+                }
+            )
             return True
         except queue.Full:
             return bool(self._send_now(message, chat_ids))
@@ -168,7 +166,7 @@ class TelegramNotifier:
         timestamp = format_formal_timestamp(event_time)
         icon, status_text = _status_meta(status)
         action_text = _action_label(action)
-        
+
         # Determine Header Color Based on Status
         header_color = "🟢" if status.lower() in {"success", "ok"} else "🔴"
         if status.lower() in {"skipped", "duplicate"}:
@@ -183,15 +181,15 @@ class TelegramNotifier:
             f"{icon} <b>STATUS:</b> {status_text}",
             "────────────────",
         ]
-        
+
         if recorded_at is not None:
             lines.append(f"⏰ <b>JAM ABSENSI:</b> <code>{format_precise_time(recorded_at)}</code>")
-        
+
         lines.append(f"⏱ <b>DURASI:</b> <code>{duration:.2f}s</code>")
-        
+
         if detail:
             lines.append(f"💬 <b>INFO:</b> {_escape_text(detail)}")
-        
+
         # System Telemetry Section
         try:
             cpu = psutil.cpu_percent()
@@ -202,7 +200,7 @@ class TelegramNotifier:
 
         if trace_id:
             lines.append(f"🧾 <b>REQUEST ID:</b> {_code(trace_id)}")
-            
+
         lines.append("────────────────")
         return "\n".join(lines)
 
@@ -221,38 +219,45 @@ class TelegramNotifier:
         timestamp = format_formal_timestamp(event_time)
         icon, status_text = _status_meta(status)
         action_text = _action_label(action, automated=True)
-        
+
         # Friendly Tone for User Notif
         greeting = "Halo"
         hour = datetime.now().hour
-        if 0 <= hour < 5: greeting = "Selamat Dini Hari"
-        elif 5 <= hour < 11: greeting = "Selamat Pagi"
-        elif 11 <= hour < 15: greeting = "Selamat Siang"
-        elif 15 <= hour < 18: greeting = "Selamat Sore"
-        else: greeting = "Selamat Malam"
+        if 0 <= hour < 5:
+            greeting = "Selamat Dini Hari"
+        elif 5 <= hour < 11:
+            greeting = "Selamat Pagi"
+        elif 11 <= hour < 15:
+            greeting = "Selamat Siang"
+        elif 15 <= hour < 18:
+            greeting = "Selamat Sore"
+        else:
+            greeting = "Selamat Malam"
 
         lines = [
             f"<b>{icon} STATUS ABSENSI {action.upper()}</b>",
             "────────────────",
             f"👤 {greeting}, <b>{_escape_text(name, 'Unknown')}</b>",
-            f"Laporan kehadiran Anda telah diproses:",
+            "Laporan kehadiran Anda telah diproses:",
             "",
             f"⚙️ <b>Aksi:</b> {action_text}",
             f"{icon} <b>Status:</b> {status_text}",
         ]
-        
+
         if recorded_at is not None:
             lines.append(f"⏰ <b>Waktu:</b> <code>{format_precise_time(recorded_at)}</code>")
-            
+
         lines.append(f"⏱ <b>Proses:</b> <code>{duration:.2f} detik</code>")
-        
+
         # Detail with a cleaner approach
         info_text = detail or _follow_up_message(status)
         lines.append(f"📝 <b>Keterangan:</b> <i>{_escape_text(info_text)}</i>")
-        
-        lines.extend([
-            "────────────────",
-        ])
+
+        lines.extend(
+            [
+                "────────────────",
+            ]
+        )
 
         # Optional: Add technical micro-telemetry for a premium feel
         try:
@@ -285,7 +290,7 @@ class TelegramNotifier:
             lines.append(f"⏰ <b>RECORDED AT:</b> <code>{format_precise_time(recorded_at)}</code>")
         if detail:
             lines.append(f"💬 <b>DETAIL:</b> {_escape_text(detail)}")
-        
+
         # Include accumulated logs if available
         logs = data.get("logs")
         if logs and isinstance(logs, list):
@@ -293,21 +298,23 @@ class TelegramNotifier:
             for log_entry in logs:
                 lines.append(f"<code>{_escape_text(log_entry)}</code>")
         # Technical Indicators Table
-        lines.extend([
-            "",
-            "� <b>TECHNICAL PERFORMANCE:</b>",
-            f"  ├ 📡 IP: {_code(data.get('public_ip', 'N/A'))}",
-            f"  ├ 🔐 WAF: {_code(data.get('waf_status', 'ACTIVE'))}",
-            f"  ├ 🍪 SESSION: {_code(data.get('session_source', 'NEW'))}",
-            f"  ├ 🧩 CAPTCHA: {_code(data.get('captcha_code', 'N/A'))}",
-            f"  └ ⚡ DURATION: <code>{float(data.get('duration', 0) or 0):.2f}s</code>",
-            "",
-            "📱 <b>AGENT IDENTITY:</b>",
-            f"  └ UA: <code>{_escape_text(data.get('user_agent', 'N/A')[:50])}...</code>",
-            "",
-            f"🕒 <b>TIMESTAMP:</b> <code>{format_formal_timestamp(event_time)}</code>",
-            "────────────────",
-        ])
+        lines.extend(
+            [
+                "",
+                "� <b>TECHNICAL PERFORMANCE:</b>",
+                f"  ├ 📡 IP: {_code(data.get('public_ip', 'N/A'))}",
+                f"  ├ 🔐 WAF: {_code(data.get('waf_status', 'ACTIVE'))}",
+                f"  ├ 🍪 SESSION: {_code(data.get('session_source', 'NEW'))}",
+                f"  ├ 🧩 CAPTCHA: {_code(data.get('captcha_code', 'N/A'))}",
+                f"  └ ⚡ DURATION: <code>{float(data.get('duration', 0) or 0):.2f}s</code>",
+                "",
+                "📱 <b>AGENT IDENTITY:</b>",
+                f"  └ UA: <code>{_escape_text(data.get('user_agent', 'N/A')[:50])}...</code>",
+                "",
+                f"🕒 <b>TIMESTAMP:</b> <code>{format_formal_timestamp(event_time)}</code>",
+                "────────────────",
+            ]
+        )
         return "\n".join(lines)
 
     async def debug(self, title: str, message: str, debug_data: dict[Any, Any] | None = None) -> None:
@@ -328,13 +335,15 @@ class TelegramNotifier:
         debug_data: dict[Any, Any] | None = None,
     ) -> None:
         payload = dict(debug_data or {})
-        payload.update({
-            "nip": nip,
-            "name": name,
-            "duration": duration,
-            "status": status,
-            "telegram_id": payload.get("telegram_id") or user_chat_id,
-        })
+        payload.update(
+            {
+                "nip": nip,
+                "name": name,
+                "duration": duration,
+                "status": status,
+                "telegram_id": payload.get("telegram_id") or user_chat_id,
+            }
+        )
         if "action_text" not in payload:
             payload["action_text"] = _action_label(action)
 
@@ -366,17 +375,17 @@ class TelegramNotifier:
             event_time=event_time,
         )
 
+        # CONSOLIDATED: Send ONLY the detailed debug log to telemetry group (final message only)
         if to_group:
-            # Send the detailed debug log to the telemetry group
             self.send_message(self.format_debug_log(payload), to_admin=False, to_group=True)
-            
+
         if to_user:
             if user_message_id and user_chat_id:
                 # If editing an existing message (Interactive), use the informative user message
                 self.edit_message(user_chat_id, user_message_id, user_message)
             else:
                 self.send_direct_message(user_chat_id, user_message)
-        
+
         # Admin direct notification only if it doesn't overlap with the user or group
         if to_admin and not (to_user and str(user_chat_id) == str(self.admin_id)):
             self.send_message(admin_message, to_admin=True, to_group=False)

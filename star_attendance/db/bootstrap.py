@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from sqlalchemy import text
 
 from star_attendance.db.manager import db_manager
-
 
 REQUIRED_TABLES = (
     "users",

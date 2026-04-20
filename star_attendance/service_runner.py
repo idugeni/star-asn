@@ -10,7 +10,6 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-
 SERVICE_TARGETS: dict[str, str] = {
     "bootstrap": "star_attendance.bootstrap_db:main",
     "api": "api.main:start_api",
@@ -67,9 +66,7 @@ def load_callable(import_path: str) -> Callable[[], int | None]:
 def require_env(command: str) -> None:
     missing = [name for name in REQUIRED_ENV.get(command, ()) if not os.getenv(name)]
     if missing:
-        raise PreflightError(
-            f"Missing required environment variables for '{command}': {', '.join(missing)}"
-        )
+        raise PreflightError(f"Missing required environment variables for '{command}': {', '.join(missing)}")
 
 
 def resolve_retry_settings() -> tuple[int, float]:
@@ -87,9 +84,7 @@ def run_service(command: str) -> int:
 
 def build_healthcheck_url() -> str:
     base_url = (
-        os.getenv("INTERNAL_API_HEALTHCHECK_URL")
-        or os.getenv("INTERNAL_API_URL")
-        or "http://127.0.0.1:8000"
+        os.getenv("INTERNAL_API_HEALTHCHECK_URL") or os.getenv("INTERNAL_API_URL") or "http://127.0.0.1:8000"
     ).rstrip("/")
     return f"{base_url}/healthz"
 
@@ -97,9 +92,7 @@ def build_healthcheck_url() -> str:
 def check_api() -> int:
     token = os.getenv("INTERNAL_API_TOKEN") or os.getenv("MASTER_SECURITY_KEY")
     if not token:
-        raise PreflightError(
-            "Healthcheck requires INTERNAL_API_TOKEN or MASTER_SECURITY_KEY to be set."
-        )
+        raise PreflightError("Healthcheck requires INTERNAL_API_TOKEN or MASTER_SECURITY_KEY to be set.")
 
     request = urllib.request.Request(
         build_healthcheck_url(),

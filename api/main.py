@@ -18,6 +18,7 @@ logger.setLevel(getattr(logging, settings.LOG_LEVEL))
 store = get_store()
 scheduler = AttendanceScheduler(store)
 
+
 # --- REAL-TIME SYNC LISTENER ---
 async def listen_to_db_notifications():
     """
@@ -33,15 +34,15 @@ async def listen_to_db_notifications():
             if sync_pending:
                 return
             sync_pending = True
-        
+
         # Wait a bit to collect multiple rapid changes (debounce)
         await asyncio.sleep(2.0)
-        
+
         logger.info("Processing real-time DB notification. Invalidating cache and syncing scheduler...")
         try:
             # 1. Force invalidate all caches to get fresh data from DB
             store.invalidate_all_caches()
-            
+
             # 2. Sync the scheduler with fresh data
             await scheduler.sync_user_schedules()
         except Exception as exc:
@@ -53,20 +54,22 @@ async def listen_to_db_notifications():
     while True:
         conn = None
         try:
-            conn = await asyncpg.connect(settings.POSTGRES_URL)
+            conn = await asyncpg.connect(settings.POSTGRES_URL, statement_cache_size=0)
             # Add listener to the connection. Using lambda to ensure it runs as a non-blocking task.
-            await conn.add_listener('scheduler_sync_trigger', lambda *args: asyncio.create_task(do_sync()))
+            await conn.add_listener("scheduler_sync_trigger", lambda *args: asyncio.create_task(do_sync()))
             logger.info("Real-time sync listener connected to database.")
-            
+
             # Keep the connection alive
             while True:
                 await asyncio.sleep(60)
-                await conn.execute("SELECT 1") # Heartbeat
+                await conn.execute("SELECT 1")  # Heartbeat
         except Exception as exc:
             logger.error(f"Real-time sync listener error: {exc}. Retrying in 5s...")
             if conn:
-                try: await conn.close()
-                except: pass
+                try:
+                    await conn.close()
+                except:
+                    pass
             await asyncio.sleep(5)
 
 
@@ -102,7 +105,7 @@ async def healthz():
     conn = None
     try:
         verify_runtime_schema(require_pgqueuer=True)
-        conn = await asyncpg.connect(settings.POSTGRES_URL)
+        conn = await asyncpg.connect(settings.POSTGRES_URL, statement_cache_size=0)
         await conn.fetchval("SELECT 1")
         queue_table_ready = await conn.fetchval("SELECT to_regclass('public.pgqueuer') IS NOT NULL")
         return {
@@ -146,6 +149,7 @@ async def restart_scheduler():
 
 # --- PUBLIC API FOR DASHBOARD (Mini App) ---
 
+
 @app.post("/api/attendance/trigger")
 async def trigger_manual_attendance(nip: str):
     """
@@ -153,11 +157,11 @@ async def trigger_manual_attendance(nip: str):
     This injects a high-priority task into pgqueuer.
     """
     logger.info(f"Manual attendance trigger received for NIP: {nip}")
-    
+
     # In a real enterprise setup, we should validate the Telegram InitData here.
     # For now, we'll queue the job directly to the engine.
     from star_attendance.queueing import enqueue_presence_task
-    
+
     try:
         await enqueue_presence_task(nip=nip, is_manual=True)
         return {"status": "queued", "nip": nip, "message": f"Task manual untuk {nip} telah masuk antrean."}

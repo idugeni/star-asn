@@ -1,11 +1,12 @@
-import threading
 import json
 import queue
+import threading
 import time
-from typing import Optional
 from contextvars import ContextVar
+
 from colorama import Fore, Style
 from sqlalchemy import text
+
 from star_attendance.core.config import settings
 from star_attendance.core.timeutils import format_log_timestamp
 
@@ -15,7 +16,8 @@ from star_attendance.core.timeutils import format_log_timestamp
 print_lock = threading.RLock()
 # Use ContextVar instead of threading.local for asyncio compatibility
 _worker_context: ContextVar[str] = ContextVar("worker_context", default="")
-_log_collector: ContextVar[Optional[list[str]]] = ContextVar("log_collector", default=None)
+_log_collector: ContextVar[list[str] | None] = ContextVar("log_collector", default=None)
+
 
 # --- Async Broadcast Manager ---
 class LogBroadcastManager:
@@ -23,41 +25,52 @@ class LogBroadcastManager:
     Manages non-blocking log broadcasts to PostgreSQL.
     Uses a background thread to process a queue.
     """
+
     def __init__(self):
         self.queue = queue.Queue(maxsize=1000)
         self.worker_thread = threading.Thread(target=self._worker, daemon=True)
         self.worker_thread.start()
 
     def _worker(self):
-        # Lazy import to avoid circular dependency
-        from star_attendance.db.manager import db_manager
-        from star_attendance.notifier import notifier
-        
+        try:
+            # Lazy import to avoid circular dependency
+            from star_attendance.db.manager import db_manager
+            from star_attendance.notifier import notifier
+        except Exception as e:
+            print(f"FATAL: LogBroadcastManager worker failed to start: {e}")
+            return
+
         while True:
             try:
                 # Wait for log items
                 item = self.queue.get()
-                if item is None: break
-                
+                print(f"DEBUG: Processing log item: {item.get('level')} - {item.get('message')[:30]}...")
+                if item is None:
+                    break
+
                 # Broadast to DB via pg_notify
                 if settings.LOG_BROADCAST_ENABLED:
                     try:
                         with db_manager.get_session() as session:
                             session.execute(text("SELECT pg_notify('live_logs', :val)"), {"val": json.dumps(item)})
                     except Exception:
-                        pass # Silently fail if DB is busy or down
-                
+                        pass  # Silently fail if DB is busy or down
+
                 # Broadcast to Telegram Log Group
-                if settings.LOG_TELEGRAM_ENABLED and item.get("level") in {"ERROR", "WARN", "SUCCESS"} and not item.get("skip_telegram"):
+                if (
+                    settings.LOG_TELEGRAM_ENABLED
+                    and item.get("level") in {"ERROR", "WARN", "SUCCESS"}
+                    and not item.get("skip_telegram")
+                ):
                     try:
                         log_msg = f"<b>[{item['level']}]</b> [{item['scope']}]\n{item['message']}"
                         notifier.send_message(log_msg, to_admin=False, to_group=True)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"DEBUG: Telegram Broadcast Error: {e}")
 
                 self.queue.task_done()
             except Exception:
-                time.sleep(1) # Safety backoff
+                time.sleep(1)  # Safety backoff
 
     def broadcast(self, level, message, scope, timestamp):
         # If a collector is active, collect the log
@@ -72,16 +85,19 @@ class LogBroadcastManager:
 
         try:
             # Non-blocking put
-            self.queue.put_nowait({
-                "timestamp": timestamp,
-                "level": level,
-                "scope": scope,
-                "message": message,
-                "skip_telegram": skip_telegram
-            })
+            self.queue.put_nowait(
+                {
+                    "timestamp": timestamp,
+                    "level": level,
+                    "scope": scope,
+                    "message": message,
+                    "skip_telegram": skip_telegram,
+                }
+            )
         except queue.Full:
             # If queue is full, we drop the broadcast to preserve app performance
             pass
+
 
 # Initialize singleton
 broadcast_manager = LogBroadcastManager()
@@ -120,13 +136,7 @@ def print_sync(msg):
 
 
 def format_info_line(level, msg, scope="CORE"):
-    colors = {
-        "INFO": Fore.BLUE,
-        "WARN": Fore.YELLOW,
-        "ERROR": Fore.RED,
-        "SUCCESS": Fore.GREEN,
-        "STEP": Fore.MAGENTA
-    }
+    colors = {"INFO": Fore.BLUE, "WARN": Fore.YELLOW, "ERROR": Fore.RED, "SUCCESS": Fore.GREEN, "STEP": Fore.MAGENTA}
     color = colors.get(level, Fore.WHITE)
     return f"{Fore.CYAN}[{get_timestamp()}] {color}[{level}] {Fore.MAGENTA}[{scope}] {Style.RESET_ALL}{get_context_prefix()}{msg}"
 
@@ -152,11 +162,24 @@ def log(level, message, scope="SYSTEM"):
     broadcast_manager.broadcast(level, message, scope, timestamp)
 
 
-def info(msg, scope="CORE"): log("INFO", msg, scope)
-def warning(msg, scope="CORE"): log("WARN", msg, scope)
-def error(msg, scope="CORE"): log("ERROR", msg, scope)
-def success(msg, scope="CORE"): log("SUCCESS", msg, scope)
-def step(msg, scope="CORE"): log("STEP", msg, scope)
+def info(msg, scope="CORE"):
+    log("INFO", msg, scope)
+
+
+def warning(msg, scope="CORE"):
+    log("WARN", msg, scope)
+
+
+def error(msg, scope="CORE"):
+    log("ERROR", msg, scope)
+
+
+def success(msg, scope="CORE"):
+    log("SUCCESS", msg, scope)
+
+
+def step(msg, scope="CORE"):
+    log("STEP", msg, scope)
 
 
 def info_with_header(header, msg, scope="CORE"):

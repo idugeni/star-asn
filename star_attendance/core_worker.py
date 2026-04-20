@@ -1,19 +1,20 @@
 import argparse
-import os
 import asyncio
+import os
 import sys
-from colorama import init, Fore, Style
+
+from colorama import Fore, Style, init
 from dotenv import load_dotenv
 
 # Add root directory to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Load environment as early as possible
-env_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
+env_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 load_dotenv(env_path)
 
-from star_attendance.core.utils import print_sync
 from star_attendance.core.processor import mass_attendance, process_single_user
+from star_attendance.core.utils import print_sync
 from star_attendance.runtime import get_store
 
 # Setup
@@ -33,8 +34,12 @@ async def main():
     # Rules options
     parser.add_argument("--rule-in-before", default="07:30", help="Time cutoff for Check In (default: 07:30)")
     parser.add_argument("--rule-out-after", default="17:00", help="Time cutoff for Check Out (default: 17:00)")
-    parser.add_argument("--rule-mode", default="smart",
-                        choices=["smart", "time", "work", "combined", "none"], help="Rule mode for Check Out")
+    parser.add_argument(
+        "--rule-mode",
+        default="smart",
+        choices=["smart", "time", "work", "combined", "none"],
+        help="Rule mode for Check Out",
+    )
     parser.add_argument("--rule-work-hours", type=float, default=8.0, help="Work hours duration for Check Out rules")
 
     # Positional args (legacy support)
@@ -62,6 +67,7 @@ async def main():
         args.store = store
         user = {"nip": target_nip, "password": args.password}
         await process_single_user(user, args, 1, 1, is_mass=False)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

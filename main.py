@@ -1,7 +1,8 @@
-import sys
-import subprocess
 import os
-from colorama import init, Fore, Style
+import subprocess
+import sys
+
+from colorama import Fore, Style, init
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -12,12 +13,14 @@ init(autoreset=True)
 
 IS_INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
 
+
 def clear_screen():
     if not IS_INTERACTIVE:
         return
-    if os.name != 'nt' and not os.getenv('TERM'):
+    if os.name != "nt" and not os.getenv("TERM"):
         return
-    os.system('cls' if os.name == 'nt' else 'clear')
+    os.system("cls" if os.name == "nt" else "clear")
+
 
 def show_banner():
     banner = f"""
@@ -31,6 +34,7 @@ def show_banner():
     """
     print(banner)
 
+
 def show_menu():
     while True:
         clear_screen()
@@ -41,18 +45,19 @@ def show_menu():
         print(f"{Fore.CYAN}    [4] {Fore.YELLOW}RESTART SCHEDULER")
         print(f"{Fore.CYAN}    [5] {Fore.WHITE}EXIT SYSTEM")
         print(f"\n    {Fore.CYAN}────────────────────────────────────────────────────────────────")
-        
+
         choice = input(f"    {Fore.WHITE}Select Action > {Style.RESET_ALL}").strip()
-        
-        if choice == '1':
+
+        if choice == "1":
             show_attendance_menu("in")
-        elif choice == '2':
+        elif choice == "2":
             show_attendance_menu("out")
-        elif choice == '3':
+        elif choice == "3":
             show_tools_menu()
-        elif choice == '4':
+        elif choice == "4":
             print(f"    {Fore.YELLOW}Restarting internal scheduler engine...")
-            import requests # type: ignore
+            import requests  # type: ignore
+
             try:
                 api_url = os.getenv("INTERNAL_API_URL", "http://127.0.0.1:8000")
                 api_token = os.getenv("INTERNAL_API_TOKEN") or os.getenv("MASTER_SECURITY_KEY", "")
@@ -65,15 +70,16 @@ def show_menu():
             except Exception:
                 print(f"    {Fore.RED}ERROR: Could not reach API.")
             input("\n    Press Enter to continue...")
-        elif choice == '5':
+        elif choice == "5":
             print(f"    {Fore.YELLOW}Star ASN Console safe shutdown. Goodbye.")
             break
+
 
 def show_attendance_menu(type="in"):
     title = "CHECK-IN OPERATIONS" if type == "in" else "CHECK-OUT OPERATIONS"
     script = "star_attendance/core_worker.py"
     color = Fore.GREEN if type == "in" else Fore.RED
-    
+
     while True:
         clear_screen()
         show_banner()
@@ -83,29 +89,30 @@ def show_attendance_menu(type="in"):
         print(f"    {Fore.CYAN}[3] {Fore.WHITE}Mass Attendance (Batch Process)")
         print(f"    {Fore.CYAN}[4] {Fore.YELLOW}Back to Master Control")
         print(f"\n    {Fore.CYAN}────────────────────────────────────────────────────────────────")
-        
+
         choice = input(f"    {Fore.WHITE}Action > {Style.RESET_ALL}").strip()
-        
-        if choice == '1':
+
+        if choice == "1":
             nip = input(f"    {Fore.WHITE}Enter NIP: {Style.RESET_ALL}").strip()
             if nip:
                 subprocess.run([sys.executable, script, "--action", type, "--nip", nip])
                 input("\n    Press Enter to continue...")
-        elif choice == '2':
+        elif choice == "2":
             nip = input(f"    {Fore.WHITE}Enter NIP: {Style.RESET_ALL}").strip()
             password = input(f"    {Fore.WHITE}Enter Password: {Style.RESET_ALL}").strip()
             if nip and password:
                 subprocess.run([sys.executable, script, "--action", type, "--nip", nip, "--password", password])
                 input("\n    Press Enter to continue...")
-        elif choice == '3':
+        elif choice == "3":
             confirm = input(f"    {Fore.YELLOW}Launch mass attendance cluster? (y/n): {Style.RESET_ALL}").lower()
-            if confirm == 'y':
+            if confirm == "y":
                 subprocess.run([sys.executable, script, "--action", type, "--mass"])
                 input("\n    Press Enter to continue...")
-        elif choice == '4':
+        elif choice == "4":
             return
         else:
             print(f"    {Fore.RED}Invalid choice.")
+
 
 def show_tools_menu():
     while True:
@@ -117,20 +124,21 @@ def show_tools_menu():
         print(f"    {Fore.CYAN}[3] {Fore.WHITE}Sync Database (Scrape Personnel)")
         print(f"    {Fore.CYAN}[4] {Fore.YELLOW}Return")
         print(f"\n    {Fore.CYAN}────────────────────────────────────────────────────────────────")
-        
+
         choice = input(f"    {Fore.WHITE}Tool > {Style.RESET_ALL}").strip()
-        
-        if choice == '1':
+
+        if choice == "1":
             subprocess.run([sys.executable, "tools/sys_tools.py", "--health"])
             input("\n    Press Enter to continue...")
-        elif choice == '2':
+        elif choice == "2":
             subprocess.run([sys.executable, "tools/sys_tools.py", "--backup"])
             input("\n    Press Enter to continue...")
-        elif choice == '3':
+        elif choice == "3":
             subprocess.run([sys.executable, "tools/sync_db.py"])
             input("\n    Press Enter to continue...")
-        elif choice == '4':
+        elif choice == "4":
             break
+
 
 if __name__ == "__main__":
     try:

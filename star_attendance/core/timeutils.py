@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 APP_TIMEZONE_NAME = "Asia/Jakarta"
@@ -39,7 +39,7 @@ def now_local() -> datetime:
 
 
 def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def now_storage() -> datetime:
@@ -63,7 +63,7 @@ def legacy_utc_naive_to_local_naive(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc).astimezone(APP_TIMEZONE).replace(tzinfo=None)
+        return value.replace(tzinfo=UTC).astimezone(APP_TIMEZONE).replace(tzinfo=None)
     return value.astimezone(APP_TIMEZONE).replace(tzinfo=None)
 
 
@@ -71,7 +71,7 @@ def legacy_local_naive_to_utc_aware(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     local = assume_local(value)
-    return local.astimezone(timezone.utc)
+    return local.astimezone(UTC)
 
 
 def format_formal_date(value: datetime | None = None) -> str:
@@ -103,14 +103,14 @@ def isoformat_utc(value: datetime | None = None) -> str:
     aware = value or now_utc()
     if aware.tzinfo is None:
         aware = legacy_local_naive_to_utc_aware(aware) or now_utc()
-    return aware.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+    return aware.astimezone(UTC).isoformat(timespec="milliseconds")
 
 
 def local_day_bounds(value: datetime | None = None) -> tuple[datetime, datetime]:
     local = to_local(value) or now_local()
     start_local = datetime.combine(local.date(), time.min, tzinfo=APP_TIMEZONE)
     end_local = start_local + timedelta(days=1)
-    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+    return start_local.astimezone(UTC), end_local.astimezone(UTC)
 
 
 def local_date(value: datetime | None = None) -> date:

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
-from typing import Any, Mapping
+from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, constants
 
@@ -9,7 +10,6 @@ from star_attendance.bot.ui import get_back_button
 from star_attendance.core.config import settings
 from star_attendance.core.timeutils import format_formal_timestamp
 from star_attendance.database_manager import get_workday_label
-
 
 UserPayload = Mapping[str, Any]
 
@@ -39,8 +39,8 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
         last_out_str = format_formal_timestamp(last_actions.get("out")) if last_actions.get("out") else "BELUM ADA"
         telegram_id = user.get("telegram_id") or "-"
         auto_status = "ACTIVE" if user.get("auto_attendance_active") else "INACTIVE"
-        in_source = str(user.get('cron_in_source', '-')).upper()
-        out_source = str(user.get('cron_out_source', '-')).upper()
+        in_source = str(user.get("cron_in_source", "-")).upper()
+        out_source = str(user.get("cron_out_source", "-")).upper()
         in_label = f" ({in_source})" if in_source != "PERSONAL" else ""
         out_label = f" ({out_source})" if out_source != "PERSONAL" else ""
 

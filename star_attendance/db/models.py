@@ -1,17 +1,20 @@
 import uuid
 from typing import Any
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Float, ForeignKey, String, Text, Enum
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship, DeclarativeBase
+
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Enum, Float, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import DeclarativeBase, relationship
+
 from star_attendance.core.timeutils import now_storage
-from star_attendance.db.enums import UserRole, AuditStatus, AuditAction, RuleMode, WorkdayPreset
+from star_attendance.db.enums import AuditAction, AuditStatus, UserRole, WorkdayPreset
+
 
 class Base(DeclarativeBase):
     pass
 
 
 class UPT(Base):
-    __tablename__ = 'upts'
+    __tablename__ = "upts"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     nama_upt = Column(String(255), nullable=False, unique=True)
@@ -21,24 +24,29 @@ class UPT(Base):
 
 
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     nip = Column(String(50), unique=True, index=True, nullable=False)
     nama = Column(String(255), nullable=False)
     password = Column(Text, nullable=True)
-    upt_id = Column(UUID(as_uuid=True), ForeignKey('upts.id'), nullable=True)
+    upt_id = Column(UUID(as_uuid=True), ForeignKey("upts.id"), nullable=True)
 
     telegram_id = Column(BigInteger, unique=True, nullable=True, index=True)
     cron_in = Column(String(10), nullable=True)
     cron_out = Column(String(10), nullable=True)
-    workdays: Any = Column(Enum(WorkdayPreset, name="workday_preset", values_callable=lambda x: [e.value for e in x]), nullable=True)
-    
+    workdays: Any = Column(
+        Enum(WorkdayPreset, name="workday_preset", values_callable=lambda x: [e.value for e in x]), nullable=True
+    )
+
     # Security & RLS
-    role: Any = Column(Enum(UserRole, name="user_role", create_type=False, values_callable=lambda x: [e.value for e in x]), default=UserRole.user)
+    role: Any = Column(
+        Enum(UserRole, name="user_role", create_type=False, values_callable=lambda x: [e.value for e in x]),
+        default=UserRole.user,
+    )
     is_admin = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
-    
+
     personal_latitude = Column(Float, nullable=True)
     personal_longitude = Column(Float, nullable=True)
 
@@ -51,11 +59,11 @@ class User(Base):
 
 
 class UserSession(Base):
-    __tablename__ = 'user_sessions'
+    __tablename__ = "user_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    nip = Column(String(50), nullable=True) 
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    nip = Column(String(50), nullable=True)
     data = Column(JSONB, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=now_storage, onupdate=now_storage)
 
@@ -63,13 +71,21 @@ class UserSession(Base):
 
 
 class AuditLog(Base):
-    __tablename__ = 'audit_logs'
+    __tablename__ = "audit_logs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=True)
-    nip = Column(String(50), nullable=False, index=True) 
-    action: Any = Column(Enum(AuditAction, name="audit_action", values_callable=lambda x: [e.value for e in x]), nullable=False, index=True)
-    status: Any = Column(Enum(AuditStatus, name="audit_status", values_callable=lambda x: [e.value for e in x]), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    nip = Column(String(50), nullable=False, index=True)
+    action: Any = Column(
+        Enum(AuditAction, name="audit_action", values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        index=True,
+    )
+    status: Any = Column(
+        Enum(AuditStatus, name="audit_status", values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        index=True,
+    )
     message = Column(Text)
     response_time = Column(Float, nullable=True)
     timestamp = Column(DateTime(timezone=True), default=now_storage, index=True)
@@ -78,7 +94,7 @@ class AuditLog(Base):
 
 
 class GlobalSetting(Base):
-    __tablename__ = 'settings'
+    __tablename__ = "settings"
 
     key = Column(String(100), primary_key=True)
     value = Column(Text)
