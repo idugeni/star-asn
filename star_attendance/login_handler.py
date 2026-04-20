@@ -627,7 +627,7 @@ class LoginHandler:
                     )
 
                     if status_callback:
-                        await status_callback(f"🧩 Memecahkan kode captcha (Percobaan {attempt}.{index})...")
+                        await status_callback(f"🧩 Memecahkan Captcha: <b>{code}</b> (Percobaan {attempt}.{index})")
 
                     data = {"tkv": tkv, "username": username, "password": password, "kv-captcha": code}
 
@@ -836,7 +836,7 @@ class LoginHandler:
                                 code = ocr_res[0][1]
                                 log("INFO", f"event=waf_browser status=solving_captcha code={code}")
                                 if status_callback:
-                                    await status_callback("🧩 Memecahkan Captcha...")
+                                    await status_callback(f"🧩 Memecahkan Captcha: <b>{code}</b>")
                                 await page.locator('input[name="kv-captcha"]').evaluate(
                                     "(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }",
                                     code,
