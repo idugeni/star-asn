@@ -418,13 +418,23 @@ class LoginHandler:
                 
                 await page.goto(f"{self.base_url}/authentication/login", wait_until="commit", timeout=60000)
                 
+                # --- Stage 1: WAF Bypass with Human Jitter ---
                 try:
-                    await page.wait_for_selector('input[name="tkv"]', state="attached", timeout=45000)
+                    # Move mouse in small circles to trick behavioral analysis
+                    for _ in range(5):
+                        await page.mouse.move(100, 100)
+                        await page.mouse.move(200, 150)
+                        await asyncio.sleep(0.5)
+
+                    await page.wait_for_selector('input[name="tkv"]', state="attached", timeout=90000)
                     tkv_value = await page.eval_on_selector('input[name="tkv"]', "el => el.value")
                     LoginHandler._last_browser_tkv = tkv_value
                     log("SUCCESS", "event=waf_browser status=ready")
                 except Exception as e:
-                    log("ERROR", f"event=waf_browser status=timeout error={e}")
+                    # Save diagnostic screenshot of the block page
+                    shot_path = f"failed_waf_{username or 'anonymous'}.png"
+                    await page.screenshot(path=shot_path)
+                    log("ERROR", f"event=waf_browser status=timeout error={e} diagnostic={shot_path}")
                     await browser.close()
                     return None
 
@@ -456,21 +466,39 @@ class LoginHandler:
                         await page.locator('input[name="kv-captcha"]').fill(code)
                         await page.locator('button[type="submit"]').click(force=True)
 
-                        await page.wait_for_function(
-                            "() => window.location.href.includes('dashboard') || document.body.innerText.includes('Dashboard') || document.body.innerText.includes('Statistik')",
-                            timeout=15000
-                        )
-                        log("SUCCESS", "event=waf_browser status=dashboard_reached")
-                        if action:
-                            attendance_res = await self._perform_attendance_in_browser(page, action, location)
-                        break
-                    except Exception:
-                        if login_attempt == 5:
-                            await page.screenshot(path=f"/tmp/failed_{username}.png")
+                        # WAIT FOR TRANSITION (Increased to 25s for slow portal)
+                        log("INFO", f"event=waf_browser status=submitted_wait user={username}")
                         try:
-                            await page.click('img[src*="captcha"]', timeout=3000)
-                            await asyncio.sleep(2)
-                        except: pass
+                            await page.wait_for_function(
+                                "() => window.location.href.includes('dashboard') || document.body.innerText.includes('Dashboard') || document.body.innerText.includes('Statistik')",
+                                timeout=25000
+                            )
+                            log("SUCCESS", "event=waf_browser status=dashboard_reached")
+                            if action:
+                                attendance_res = await self._perform_attendance_in_browser(page, action, location)
+                            break
+                        except Exception:
+                            # DO NOT REFRESH CAPTCHA IMMEDIATELY
+                            # Check if we are still on login page with an error
+                            content_lower = (await page.content()).lower()
+                            if "dashboard" in page.url or "statistik" in content_lower:
+                                log("SUCCESS", "event=waf_browser status=login_success_delayed")
+                                if action:
+                                    attendance_res = await self._perform_attendance_in_browser(page, action, location)
+                                break
+                            
+                            # If we see "Wrong Captcha" or similar, ONLY THEN we refresh
+                            if "captcha" in content_lower and ("salah" in content_lower or "invalid" in content_lower):
+                                log("WARN", "event=waf_browser status=wrong_captcha action=refreshing")
+                                await page.click('img[src*="captcha"]', timeout=3000)
+                                await asyncio.sleep(2)
+                            else:
+                                log("WARN", "event=waf_browser status=wait_timeout action=no_refresh_retry")
+                                # Just wait a bit more or continue to next attempt without forced refresh
+                                await asyncio.sleep(3)
+                    except Exception as e:
+                        log("ERROR", f"event=waf_browser status=attempt_error error={e}")
+                        await asyncio.sleep(2)
 
                 cookies_list = await context.cookies()
                 formatted = [{"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]} for c in cookies_list]
