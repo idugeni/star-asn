@@ -551,7 +551,7 @@ class LoginHandler:
                                 # Double check after lock
                                 if not LoginHandler._waf_cookies:
                                     log("INFO", "event=waf_bridge status=start action=launch_browser")
-                                    cookies = await self._solve_waf_challenge_via_browser()
+                                    cookies = await self._solve_waf_challenge_via_browser(status_callback=status_callback)
                                     if cookies and isinstance(cookies, list):
                                         self._session_source = "BRIDGE"
                                         waf_status = "BYPASSED"
@@ -750,7 +750,9 @@ class LoginHandler:
             }
         return {"status": "failed", "message": "Browser bridge login failed"}
 
-    async def _solve_waf_challenge_via_browser(self, username=None, password=None, action=None, location=None):
+    async def _solve_waf_challenge_via_browser(
+        self, username=None, password=None, action=None, location=None, status_callback=None
+    ):
         """
         Launches a real Chromium browser to solve the WAF challenge,
         perform full login if credentials provided, and optionally execute attendance.
@@ -762,17 +764,22 @@ class LoginHandler:
             return None
 
         try:
+            if status_callback:
+                await status_callback("🌐 Meluncurkan browser untuk verifikasi WAF...")
+
             headless = settings.WAF_BROWSER_HEADLESS
             async with browser_bridge_semaphore:
                 async with async_playwright() as p:
-                    browser = await p.chromium.launch(headless=headless)
-                    context = await browser.new_context(
-                        user_agent=self.user_agent, viewport={"width": 1280, "height": 720}
+                    browser = await p.chromium.launch(
+                        headless=headless, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
                     )
+                    context = await browser.new_context(user_agent=self.user_agent, viewport={"width": 1280, "height": 720})
                     page = await context.new_page()
 
                     login_url = f"{self.base_url}/authentication/login"
                     log("INFO", f"event=waf_browser status=opened url={login_url}")
+                    if status_callback:
+                        await status_callback("⏳ Menunggu verifikasi WAF (Cloudflare/Citrix)...")
 
                     # --- OPTIMIZATION: ASSET BLOCKING & ROUTE INTERCEPTION ---
                     async def intercepted_request(route):
@@ -846,6 +853,8 @@ class LoginHandler:
                             if ocr_res:
                                 code = ocr_res[0][1]
                                 log("INFO", f"event=waf_browser status=solving_captcha code={code}")
+                                if status_callback:
+                                    await status_callback("🧩 Memecahkan Captcha...")
                                 await page.locator('input[name="kv-captcha"]').evaluate(
                                     "(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }",
                                     code,
