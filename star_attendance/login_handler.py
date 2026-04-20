@@ -154,7 +154,6 @@ class LoginHandler:
                 return True
 
             log("INFO", "event=waf_priming status=start action=launching_master_identity")
-            # Create a temporary handler just for priming
             temp_handler = LoginHandler(base_url)
             cookies = await temp_handler._solve_waf_challenge_via_browser()
             if cookies:
@@ -202,7 +201,6 @@ class LoginHandler:
             return None
 
     def _is_valid_code(self, code):
-        """Strictly enforce 6-digit captcha as per enterprise requirements"""
         if not code or len(code) != 6:
             return False
         return True
@@ -217,41 +215,25 @@ class LoginHandler:
             ranges = [
                 (np.array([28, 35, 35]), np.array([100, 255, 255])),
                 (np.array([35, 50, 50]), np.array([95, 255, 255])),
-                (np.array([40, 60, 50]), np.array([85, 255, 255])),
             ]
             masks = [cv2.inRange(hsv, lower, upper) for lower, upper in ranges]
             mask = cv2.bitwise_or(masks[0], masks[1])
-            mask = cv2.bitwise_or(mask, masks[2])
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
             cleaned_mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-            cleaned_mask = cv2.morphologyEx(cleaned_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
             contours, _ = cv2.findContours(cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             final_img = np.ones_like(mask) * 255
             valid_contours = []
             for cnt in contours:
                 x, y, w, h = cv2.boundingRect(cnt)
                 area = cv2.contourArea(cnt)
-                aspect_ratio = float(w) / h
-                if area > 18 and aspect_ratio < 10 and h > 6:
+                if area > 18 and h > 6:
                     valid_contours.append(cnt)
             if not valid_contours:
-                green = img[:, :, 1]
-                green = self._enhance_gray(green)
-                blurred = cv2.GaussianBlur(green, (3, 3), 0)
-                thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 13, 2)
-                thresh = 255 - thresh
-                thresh = cv2.copyMakeBorder(thresh, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
-                small_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-                dilated = cv2.dilate(thresh, small_kernel, iterations=1)
-                if self._black_ratio(dilated) >= 0.002:
-                    return dilated
-                return thresh
+                return None
             cv2.drawContours(final_img, valid_contours, -1, (0), thickness=cv2.FILLED)
             final_img = cv2.copyMakeBorder(final_img, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
             return final_img
-
-        except Exception as e:
-            log("ERROR", f"Gagal memproses gambar: {e}")
+        except Exception:
             return None
 
     async def solve_captcha(self):
@@ -261,8 +243,7 @@ class LoginHandler:
                 return None
             res = await self.solve_captcha_bytes(image_bytes)
             return res.get("prediction")
-        except Exception as e:
-            log("WARN", f"event=captcha_fetch error={e}")
+        except Exception:
             await asyncio.sleep(0.5)
         return None
 
@@ -288,11 +269,9 @@ class LoginHandler:
     _public_ip_expiry: float = 0.0
 
     async def get_public_ip(self) -> str:
-        """Fetch current public IP address with 5-minute caching"""
         now = time.time()
         if LoginHandler._public_ip_cache and now < LoginHandler._public_ip_expiry:
             return LoginHandler._public_ip_cache
-
         try:
             for url in ["https://api.ipify.org", "https://ifconfig.me/ip", "https://checkip.amazonaws.com"]:
                 try:
@@ -301,11 +280,9 @@ class LoginHandler:
                         LoginHandler._public_ip_cache = resp.text.strip()
                         LoginHandler._public_ip_expiry = now + 300  
                         return LoginHandler._public_ip_cache
-                except Exception:
-                    continue
+                except Exception: continue
             return LoginHandler._public_ip_cache or "UNKNOWN"
-        except Exception:
-            return LoginHandler._public_ip_cache or "ERROR"
+        except Exception: return "ERROR"
 
     async def login(
         self,
@@ -333,30 +310,8 @@ class LoginHandler:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                if attempt == 1 and not LoginHandler._waf_cookies:
-                    log("INFO", "event=waf_priming status=stage1 action=warmup jitter=3.5s")
-                    await self.client.get(f"{self.base_url}/", headers={"Sec-Fetch-Site": "none"})
-                    await asyncio.sleep(3.5)
-
-                    log("INFO", "event=waf_priming status=stage2 action=warmup jitter=3.0s")
-                    await self.client.get(
-                        f"{self.base_url}/authentication/login",
-                        headers={"Sec-Fetch-Site": "same-origin", "Referer": self.base_url},
-                    )
-                    await asyncio.sleep(3.0)
-
                 start_time = datetime.now()
-                waf_status = "ACTIVE"
-                
-                r_init = await self.client.get(
-                    login_url,
-                    headers={
-                        "Sec-Fetch-Dest": "document",
-                        "Sec-Fetch-Mode": "navigate",
-                        "Sec-Fetch-Site": "same-origin",
-                        "Sec-Fetch-User": "?1",
-                    },
-                )
+                r_init = await self.client.get(login_url)
 
                 if 'data-layout="vertical"' in r_init.text and 'class="user-name-text"' in r_init.text:
                     log("SUCCESS", "event=session_id status=pre_authenticated")
@@ -369,44 +324,21 @@ class LoginHandler:
                     }
 
                 if 'name="tkv"' not in r_init.text:
-                    if not LoginHandler._waf_cookies:
-                        async with LoginHandler._waf_lock:
-                            if not LoginHandler._waf_cookies:
-                                log("INFO", "event=waf_bridge status=start action=launch_browser")
-                                bridge_res = await self._solve_waf_challenge_via_browser(status_callback=status_callback)
-                                if isinstance(bridge_res, dict) and "cookies" in bridge_res:
-                                    LoginHandler._waf_cookies = cast(list[CookieData], bridge_res["cookies"])
-                                    for c in LoginHandler._waf_cookies:
-                                        self.client.cookies.set(c["name"], c["value"])
-                                    log("SUCCESS", "event=waf_bridge status=success action=cookies_synced")
-                    
-                    if attempt == max_attempts:
-                        return await self._run_browser_login_fallback(username, password, action, location, status_callback, start_time)
-                    
-                    await asyncio.sleep(1.0)
-                    continue
+                    log("WARN", "event=tkv status=missing action=escalating_to_browser")
+                    return await self._run_browser_login_fallback(username, password, action, location, status_callback, start_time)
 
-                # --- TKV & COOKIE SYNC ---
-                tkv = None
-                if LoginHandler._last_browser_tkv:
-                    tkv = LoginHandler._last_browser_tkv
-                    log("INFO", f"event=tkv status=reused_from_browser val={tkv}")
-                    LoginHandler._last_browser_tkv = None
-                else:
-                    try:
-                        tkv = r_init.text.split('name="tkv" value="')[1].split('"')[0]
-                    except Exception:
-                        log("WARN", f"event=tkv status=parse_failed")
-                        continue
+                # --- TKV extraction ---
+                try:
+                    tkv = r_init.text.split('name="tkv" value="')[1].split('"')[0]
+                except Exception:
+                    continue
 
                 # 2. Solve Captcha
                 image_bytes = await self._fetch_captcha_bytes()
-                if image_bytes is None:
-                    continue
+                if image_bytes is None: continue
                 
                 candidates = await self._get_two_best_candidates(image_bytes, settings.CAPTCHA_MIN_CONF)
-                if not candidates:
-                    continue
+                if not candidates: continue
                 
                 for index, (conf, code, mode) in enumerate(candidates, start=1):
                     log("INFO", f"event=login_attempt attempt={attempt}.{index} captcha={Fore.YELLOW}{code}")
@@ -433,13 +365,10 @@ class LoginHandler:
                                 "response_time": response_time,
                                 "attempts": attempt,
                                 "captcha_code": code,
-                                "waf_status": waf_status,
-                                "public_ip": await self.get_public_ip(),
                             }
                         else:
                             msg = res.get("message", "").lower()
-                            if "captcha" in msg:
-                                continue
+                            if "captcha" in msg: continue
                             if any(k in msg for k in ["belum terdaftar", "salah nip", "salah password", "login gagal"]):
                                 return {"status": "terminal", "message": res.get("message")}
                             failure_reason = res.get("message") or "login_failed"
@@ -470,95 +399,93 @@ class LoginHandler:
                 "cookies": res_browser.get("cookies"),
                 "attendance_result": res_browser.get("attendance_result"),
                 "session_source": "BRIDGE",
-                "waf_status": "BYPASSED",
             }
         return {"status": "failed", "message": "Browser bridge login failed"}
 
     async def _solve_waf_challenge_via_browser(self, username=None, password=None, action=None, location=None, status_callback=None):
         try:
             from playwright.async_api import async_playwright
-        except ImportError:
-            return None
+        except ImportError: return None
 
-        try:
-            async with browser_bridge_semaphore:
-                async with async_playwright() as p:
-                    browser = await p.chromium.launch(
-                        headless=settings.WAF_BROWSER_HEADLESS, 
-                        args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
-                    )
-                    context = await browser.new_context(user_agent=self.user_agent, viewport={"width": 1280, "height": 720})
-                    page = await context.new_page()
-                    
-                    await page.goto(f"{self.base_url}/authentication/login", wait_until="commit", timeout=60000)
-                    
-                    try:
-                        await page.wait_for_selector('input[name="tkv"]', state="attached", timeout=45000)
-                        tkv_value = await page.eval_on_selector('input[name="tkv"]', "el => el.value")
-                        LoginHandler._last_browser_tkv = tkv_value
-                        cookies_list = await context.cookies()
-                        log("SUCCESS", "event=waf_browser status=ready")
-                    except Exception as e:
-                        log("ERROR", f"event=waf_browser status=timeout error={e}")
-                        await browser.close()
-                        return None
+        async with browser_bridge_semaphore:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=settings.WAF_BROWSER_HEADLESS, 
+                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+                )
+                context = await browser.new_context(user_agent=self.user_agent, viewport={"width": 1280, "height": 720})
+                page = await context.new_page()
+                
+                await page.goto(f"{self.base_url}/authentication/login", wait_until="commit", timeout=60000)
+                
+                try:
+                    await page.wait_for_selector('input[name="tkv"]', state="attached", timeout=45000)
+                    tkv_value = await page.eval_on_selector('input[name="tkv"]', "el => el.value")
+                    LoginHandler._last_browser_tkv = tkv_value
+                    log("SUCCESS", "event=waf_browser status=ready")
+                except Exception as e:
+                    log("ERROR", f"event=waf_browser status=timeout error={e}")
+                    await browser.close()
+                    return None
 
-                    if not username or not password:
-                        formatted = [{"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]} for c in cookies_list]
-                        await browser.close()
-                        return {"status": "success", "cookies": formatted}
-
-                    # Full Login Loop
-                    attendance_res = None
-                    for login_attempt in range(1, 6):
-                        try:
-                            await page.locator('input[name="username"]').fill(username)
-                            await page.locator('input[name="password"]').fill(password)
-                            
-                            captcha_img = await page.wait_for_selector('img[src*="captcha"]', timeout=10000)
-                            img_bytes = await captcha_img.screenshot()
-                            ocr_candidates = await self._get_two_best_candidates(img_bytes, 0.2)
-                            if not ocr_candidates:
-                                await page.click('img[src*="captcha"]')
-                                await asyncio.sleep(2)
-                                continue
-                            
-                            code = ocr_candidates[0][1]
-                            await page.locator('input[name="kv-captcha"]').fill(code)
-                            await page.locator('button[type="submit"]').click(force=True)
-
-                            await page.wait_for_function(
-                                "() => window.location.href.includes('dashboard') || document.body.innerText.includes('Dashboard') || document.body.innerText.includes('Statistik')",
-                                timeout=12000
-                            )
-                            log("SUCCESS", "event=waf_browser status=dashboard_reached")
-                            if action:
-                                attendance_res = await self._perform_attendance_in_browser(page, action, location)
-                            break
-                        except Exception:
-                            if login_attempt == 5:
-                                await page.screenshot(path=f"/tmp/failed_{username}.png")
-                            await page.click('img[src*="captcha"]', timeout=3000)
-                            await asyncio.sleep(2)
-
+                if not username or not password:
                     cookies_list = await context.cookies()
                     formatted = [{"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]} for c in cookies_list]
-                    
-                    if username:
-                        try:
-                            from star_attendance.runtime import get_store
-                            store = get_store()
-                            db_user = store.get_user_data(username)
-                            if db_user:
-                                store.save_user_session(db_user["id"], {c["name"]: c["value"] for c in cookies_list}, nip=username)
-                        except: pass
-                    
                     await browser.close()
-                    return {"status": "success", "cookies": formatted, "attendance_result": attendance_res}
+                    return {"status": "success", "cookies": formatted}
 
-        except Exception as e:
-            log("ERROR", f"event=waf_browser exception={e}")
-            return None
+                attendance_res = None
+                for login_attempt in range(1, 6):
+                    try:
+                        await page.locator('input[name="username"]').fill(username)
+                        await page.locator('input[name="password"]').fill(password)
+                        
+                        await page.wait_for_load_state("networkidle")
+                        captcha_img = await page.wait_for_selector('img[src*="captcha"]', state="visible", timeout=15000)
+                        await captcha_img.scroll_into_view_if_needed()
+                        await asyncio.sleep(1)
+                        img_bytes = await captcha_img.screenshot()
+                        
+                        ocr_candidates = await self._get_two_best_candidates(img_bytes, 0.2)
+                        if not ocr_candidates:
+                            await page.click('img[src*="captcha"]')
+                            await asyncio.sleep(2)
+                            continue
+                        
+                        code = ocr_candidates[0][1]
+                        await page.locator('input[name="kv-captcha"]').fill(code)
+                        await page.locator('button[type="submit"]').click(force=True)
+
+                        await page.wait_for_function(
+                            "() => window.location.href.includes('dashboard') || document.body.innerText.includes('Dashboard') || document.body.innerText.includes('Statistik')",
+                            timeout=15000
+                        )
+                        log("SUCCESS", "event=waf_browser status=dashboard_reached")
+                        if action:
+                            attendance_res = await self._perform_attendance_in_browser(page, action, location)
+                        break
+                    except Exception:
+                        if login_attempt == 5:
+                            await page.screenshot(path=f"/tmp/failed_{username}.png")
+                        try:
+                            await page.click('img[src*="captcha"]', timeout=3000)
+                            await asyncio.sleep(2)
+                        except: pass
+
+                cookies_list = await context.cookies()
+                formatted = [{"name": c["name"], "value": c["value"], "domain": c["domain"], "path": c["path"]} for c in cookies_list]
+                
+                if username:
+                    try:
+                        from star_attendance.runtime import get_store
+                        store = get_store()
+                        db_user = store.get_user_data(username)
+                        if db_user:
+                            store.save_user_session(db_user["id"], {c["name"]: c["value"] for c in cookies_list}, nip=username)
+                    except: pass
+                
+                await browser.close()
+                return {"status": "success", "cookies": formatted, "attendance_result": attendance_res}
 
     async def _perform_attendance_in_browser(self, page, action, location=None):
         try:
@@ -580,6 +507,4 @@ class LoginHandler:
             result = await page.evaluate(script)
             log("INFO", f"event=browser_attendance status=result data={result}")
             return result.get("status") == "success" or "berhasil" in str(result).lower()
-        except Exception as e:
-            log("ERROR", f"event=browser_attendance exception={e}")
-            return False
+        except Exception: return False
