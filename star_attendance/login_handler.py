@@ -18,6 +18,7 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 import ddddocr  # type: ignore
 import numpy as np
 from colorama import Fore, Style, init
+from curl_cffi import CurlMime  # type: ignore
 from curl_cffi.requests import AsyncSession  # type: ignore
 
 from star_attendance.core.config import settings
@@ -629,16 +630,15 @@ class LoginHandler:
                     if status_callback:
                         await status_callback(f"🧩 Memecahkan Captcha: <b>{code}</b>")
 
-                    data = {
-                        "tkv": tkv,
-                        "username": username,
-                        "password": password,
-                        "kv-captcha": code,
-                    }
+                    mp = CurlMime()
+                    mp.addpart(name="tkv", data=tkv)
+                    mp.addpart(name="username", data=username)
+                    mp.addpart(name="password", data=password)
+                    mp.addpart(name="kv-captcha", data=code)
                     request_start_time = time.time()
                     r_post = await self.client.post(
                         login_url,
-                        multipart=data,
+                        multipart=mp,
                         headers={
                             "X-Requested-With": "XMLHttpRequest", 
                             "Origin": self.base_url, 
