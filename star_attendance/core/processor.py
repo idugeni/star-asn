@@ -201,6 +201,7 @@ async def process_single_user(
             "attempts": getattr(engine, "last_attempts", 1),
             "captcha_code": getattr(engine, "last_captcha", "N/A"),
             "waf_status": getattr(engine, "last_waf_status", "ACTIVE"),
+            "failure_stage": getattr(engine, "last_failure_stage", None),
             "public_ip": getattr(engine, "last_public_ip", "N/A"),
             "user_agent": getattr(engine, "last_user_agent", "N/A"),
             "source": source,

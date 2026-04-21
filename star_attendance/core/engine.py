@@ -78,6 +78,13 @@ class AttendanceEngine:
         self.active_password = None
         self.csrf_token = None
         self._accumulated_logs: list[str] = []
+        self.last_session_source = "NEW"
+        self.last_attempts = 0
+        self.last_captcha = "N/A"
+        self.last_waf_status = "ACTIVE"
+        self.last_public_ip = "N/A"
+        self.last_user_agent = self.user_agent
+        self.last_failure_stage: str | None = None
 
     def _apply_cookies(self, cookies: Any) -> None:
         if not cookies:
@@ -145,6 +152,7 @@ class AttendanceEngine:
                 else:
                     warning("Sesi tersimpan tidak valid atau expired. Mencoba login otomatis...", scope=self.scope)
                     self.client.cookies.clear()
+                    self.store.delete_user_session(username)
 
             # 2. Automated login fallback (Passing action/location for Browser Session Continuity)
             info(f"Mencoba login otomatis untuk {username}...", scope=self.scope)
@@ -153,42 +161,60 @@ class AttendanceEngine:
             )
 
             if login_result and "cookies" in login_result:
+                self.last_failure_stage = login_result.get("failure_stage")
+                self.last_session_source = login_result.get("session_source", "NEW")
+                self.last_attempts = login_result.get("attempts", 1)
+                self.last_captcha = login_result.get("captcha_code", "N/A")
+                self.last_waf_status = login_result.get("waf_status", "ACTIVE")
+                self.last_public_ip = login_result.get("public_ip", "N/A")
+                self.last_user_agent = login_result.get("user_agent", self.user_agent)
                 self._apply_cookies(login_result["cookies"])
                 self.last_response_time = login_result.get("response_time", 0.0)
 
-                # Save session for future use
-                self.store.save_user_session(
-                    username,
-                    {
-                        "cookies": self.client.cookies.get_dict(),
-                        "captured_at": isoformat_local(),
-                        "user_agent": self.user_agent,
-                    },
-                )
-
                 # Check if attendance was already done via Browser Bridge
                 if login_result.get("attendance_result") is True:
+                    self.store.save_user_session(
+                        username,
+                        {
+                            "cookies": self.client.cookies.get_dict(),
+                            "captured_at": isoformat_local(),
+                            "user_agent": self.user_agent,
+                        },
+                    )
                     self._accumulated_logs = stop_log_collection()
                     return "COMPLETED"
 
                 # Verify after login
                 if await self.fetch_user_profile():
+                    self.store.save_user_session(
+                        username,
+                        {
+                            "cookies": self.client.cookies.get_dict(),
+                            "captured_at": isoformat_local(),
+                            "user_agent": self.user_agent,
+                        },
+                    )
                     success(f"Login otomatis berhasil ({self.last_response_time:.2f}s).", scope=self.scope)
                     self._accumulated_logs = stop_log_collection()
                     return True
                 else:
+                    self.last_failure_stage = "dashboard_unreachable"
                     if login_result.get("session_source") == "PERSISTENT":
                         warning(
                             f"Deteksi sesi PERSISTENT untuk {username} tidak valid. Membersihkan cookies...",
                             scope=self.scope,
                         )
                         self.client.cookies.clear()
+                        self.store.delete_user_session(username)
             elif login_result and login_result.get("status") == "circuit_open":
+                self.last_failure_stage = login_result.get("failure_stage")
                 warning("Portal circuit breaker sedang aktif. Menunda percobaan login.", scope=self.scope)
                 self._accumulated_logs = stop_log_collection()
                 return "CIRCUIT_OPEN"
 
             failure_msg = login_result.get("message") if login_result else "Unknown login failure"
+            if login_result and login_result.get("status") == "success":
+                failure_msg = "Dashboard tidak bisa diverifikasi setelah login."
             error(f"Gagal login untuk {username}: {failure_msg}", scope=self.scope)
             self._accumulated_logs = stop_log_collection()
             return failure_msg
@@ -243,7 +269,7 @@ class AttendanceEngine:
                             scope=self.scope,
                         )
                         self.client.cookies.clear()
-                        self.store.save_user_session(self.nip, None)  # Clear invalid session from DB
+                        self.store.delete_user_session(self.nip)
                 except Exception as e:
                     warning(f"Gagal memproses sesi tersimpan: {e}", scope=self.scope)
                     self.client.cookies.clear()
@@ -273,9 +299,8 @@ class AttendanceEngine:
                     cookies = login_result["cookies"]
                     if cookies and isinstance(cookies, list):
                         self._session_source = "BRIDGE"
-                        waf_status = "BYPASSED"
-                        LoginHandler._waf_cookies = cast(list[CookieData], cookies)
-                        for c in LoginHandler._waf_cookies:
+                        LoginHandler.cache_shared_waf_cookies(cast(list[CookieData], cookies))
+                        for c in LoginHandler._waf_cookies or []:
                             if not isinstance(c, dict):
                                 continue
                             cookie = cast(CookieData, c)
@@ -298,16 +323,7 @@ class AttendanceEngine:
                     self.last_waf_status = login_result.get("waf_status", "ACTIVE")
                     self.last_public_ip = login_result.get("public_ip", "N/A")
                     self.last_user_agent = login_result.get("user_agent", self.user_agent)
-
-                    # Save session immediately
-                    self.store.save_user_session(
-                        self.nip,
-                        {
-                            "cookies": self.client.cookies.get_dict(),
-                            "captured_at": isoformat_local(),
-                            "user_agent": self.user_agent,
-                        },
-                    )
+                    self.last_failure_stage = login_result.get("failure_stage")
 
                     # THE "SUCCESS TOTAL" SHORTCUT
                     if login_result.get("attendance_result") is True:
@@ -316,6 +332,14 @@ class AttendanceEngine:
                         self.last_waf_status = "BYPASSED"
                         self.last_public_ip = login_result.get("public_ip", "N/A")
                         self.last_user_agent = login_result.get("user_agent", self.user_agent)
+                        self.store.save_user_session(
+                            self.nip,
+                            {
+                                "cookies": self.client.cookies.get_dict(),
+                                "captured_at": isoformat_local(),
+                                "user_agent": self.user_agent,
+                            },
+                        )
                         success(
                             f"Absensi {self.action.upper()} diselesaikan via Browser Session (Bypass).",
                             scope=self.scope,
@@ -324,11 +348,22 @@ class AttendanceEngine:
                         return "COMPLETED"
 
                     if await self.fetch_user_profile():
+                        self.store.save_user_session(
+                            self.nip,
+                            {
+                                "cookies": self.client.cookies.get_dict(),
+                                "captured_at": isoformat_local(),
+                                "user_agent": self.user_agent,
+                            },
+                        )
                         success(f"Login otomatis berhasil ({self.last_response_time:.2f}s).", scope=self.scope)
                         self._accumulated_logs = stop_log_collection()
                         return True
+                    self.last_failure_stage = "dashboard_unreachable"
 
             failure_msg = login_result.get("message") if login_result else "Unknown login failure"
+            if login_result and login_result.get("status") == "success":
+                failure_msg = "Dashboard tidak bisa diverifikasi setelah login."
             error(f"Gagal login untuk {self.nip}: {failure_msg}", scope=self.scope)
             self._accumulated_logs = stop_log_collection()
             return failure_msg

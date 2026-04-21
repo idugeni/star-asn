@@ -28,9 +28,9 @@ def _code(value: Any, default: str = "-") -> str:
 def _action_label(action: str, *, automated: bool = False) -> str:
     normalized = str(action).lower()
     if normalized == "in":
-        return "AUTO CHECK-IN" if automated else "CHECK-IN"
+        return "PRESENSI MASUK" + (" (OTOMATIS)" if automated else "")
     if normalized == "out":
-        return "AUTO CHECK-OUT" if automated else "CHECK-OUT"
+        return "PRESENSI PULANG" + (" (OTOMATIS)" if automated else "")
     return html.escape(str(action).upper(), quote=False)
 
 
@@ -234,8 +234,9 @@ class TelegramNotifier:
         else:
             greeting = "Selamat Malam"
 
+        action_label = "MASUK" if action.lower() == "in" else "PULANG"
         lines = [
-            f"<b>{icon} STATUS ABSENSI {action.upper()}</b>",
+            f"<b>{icon} STATUS PRESENSI {action_label}</b>",
             "────────────────",
             f"👤 {greeting}, <b>{_escape_text(name, 'Unknown')}</b>",
             "Laporan kehadiran Anda telah diproses:",

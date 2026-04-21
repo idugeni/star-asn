@@ -54,8 +54,9 @@ async def _show_history(message: Message, *, services: CallbackServices, tid: in
         response += "<i>Belum ada riwayat aktivitas.</i>"
     for log_entry in logs:
         icon = "✅" if log_entry["status"] == "success" else "❌"
+        action_name = "PRESENSI MASUK" if log_entry["action"].lower() == "in" else "PRESENSI PULANG"
         response += (
-            f"{icon} <b>{log_entry['action'].upper()}</b>\n"
+            f"{icon} <b>{action_name}</b>\n"
             f"   └ <code>{format_formal_timestamp(log_entry['timestamp'])}</code>\n"
         )
     await services.edit_message(message, response, InlineKeyboardMarkup([[get_back_button()]]))
@@ -314,11 +315,12 @@ async def _trigger_single_action(
         )
         return
 
+    action_name = "MASUK" if action.lower() == "in" else "PULANG"
     # 1. Send initial processing message
     sent_msg = await message.edit_text(
-        f"⏳ <b>MEMPROSES ABSENSI {action.upper()}...</b>\n"
+        f"⏳ <b>MEMPROSES PRESENSI {action_name}...</b>\n"
         f"👤 <b>Target:</b> <code>{user['nama']}</code>\n"
-        "<i>Mohon tunggu, sedang menembus WAF & memecahkan captcha.</i>",
+        "<i>Mohon tunggu, sedang melakukan verifikasi keamanan & memproses data.</i>",
         parse_mode=constants.ParseMode.HTML,
     )
 
@@ -339,11 +341,12 @@ async def _trigger_single_action(
         try:
             # Reconstruct the processing message with current status
             updated_text = (
-                f"⏳ <b>MEMPROSES ABSENSI {action.upper()}...</b>\n"
+                f"⌛ <b>STATUS ABSENSI {action.upper()}...</b>\n"
                 f"👤 <b>Target:</b> <code>{user['nama']}</code>\n"
                 f"<i>{status_msg}</i>"
             )
-            await services.edit_message(sent_msg, updated_text, None)
+            if isinstance(sent_msg, Message):
+                await services.edit_message(sent_msg, updated_text, None)
         except Exception:
             pass
 
@@ -485,3 +488,94 @@ async def handle_callback(
         return
     if data == "trigger_stop":
         await _trigger_stop(message, services=services, tid=tid)
+        return
+    if data == "view_allowance_menu":
+        await _show_allowance(message, services=services, tid=tid)
+        return
+    if data == "sync_allowance":
+        await _sync_allowance(message, services=services, tid=tid)
+        return
+
+
+async def _show_allowance(message: Message, *, services: CallbackServices, tid: int) -> None:
+    user = services.store.get_user_by_telegram_id(tid)
+    if not user:
+        return
+
+    from star_attendance.allowance_handler import AllowanceHandler
+
+    period_code, _ = AllowanceHandler.get_current_period_code()
+    readable_period = AllowanceHandler.format_period_code(period_code)
+    allowances = services.store.get_personal_allowance(user["nip"], period_code)
+
+    response = f"<b>💰 TUNJANGAN KINERJA</b>\n📅 Periode: <code>{readable_period}</code>\n────────────────\n"
+    if not allowances:
+        response += "<i>Data belum tersedia di database lokal. Silakan sinkronkan data terbaru dari portal.</i>"
+    else:
+        try:
+
+            def _parse_idr(val: str) -> float:
+                return float(val.replace(".", "").replace(",", "."))
+
+            total_sum = sum(_parse_idr(item["total"]) for item in allowances)
+            total_deduction = sum(_parse_idr(item["deduction_amount"]) for item in allowances)
+            formatted_sum = "{:,.2f}".format(total_sum).replace(",", "X").replace(".", ",").replace("X", ".")
+            formatted_deduction = (
+                "{:,.2f}".format(total_deduction).replace(",", "X").replace(".", ",").replace("X", ".")
+            )
+        except Exception:
+            formatted_sum = "ERROR"
+            formatted_deduction = "ERROR"
+
+        response += (
+            f"📊 <b>ESTIMASI TOTAL:</b> <code>Rp {formatted_sum}</code>\n"
+            f"🔻 <b>TOTAL POTONGAN:</b> <code>Rp {formatted_deduction}</code>\n"
+            f"📅 <b>HARI TERCATAT:</b> <code>{len(allowances)} hari</code>\n\n"
+        )
+
+        # Show last 7 days
+        for item in allowances[-7:]:
+            response += (
+                f"📅 <code>{item['date']}</code> | <b>Rp {item['total']}</b>\n"
+                f"   └ Masuk: <code>{item['clock_in']}</code> Keluar: <code>{item['clock_out']}</code>\n"
+            )
+            if item.get("deduction_reason"):
+                response += f"   ⚠️ <i>{item['deduction_reason']} (-{item['deduction_amount']})</i>\n"
+
+    keyboard = [
+        [InlineKeyboardButton("🔄 SINKRONKAN DATA", callback_data="sync_allowance")],
+        [get_back_button()],
+    ]
+    await services.edit_message(message, response, InlineKeyboardMarkup(keyboard))
+
+
+async def _sync_allowance(message: Message, *, services: CallbackServices, tid: int) -> None:
+    user = services.store.get_user_by_telegram_id(tid)
+    if not user:
+        return
+
+    await message.edit_text(
+        "⏳ <b>SEDANG MENGAMBIL DATA TUNJANGAN...</b>\n"
+        "<i>Mohon tunggu, sedang login ke portal budget & mengekstraksi data terbaru.</i>",
+        parse_mode=constants.ParseMode.HTML,
+    )
+
+    from star_attendance.allowance_handler import sync_user_allowance
+
+    try:
+        result = await sync_user_allowance(user["nip"])
+        if result.get("status") == "success":
+            await _show_allowance(message, services=services, tid=tid)
+        else:
+            msg = result.get("message", "Unknown Error")
+            if msg == "session_expired":
+                msg = "Sesi portal expired. Silakan lakukan absen manual untuk memperbarui sesi."
+            await services.edit_message(
+                message,
+                f"❌ <b>GAGAL SINKRONISASI</b>\n<code>{msg}</code>",
+                InlineKeyboardMarkup([[get_back_button()]]),
+            )
+    except Exception as exc:
+        await services.edit_message(
+            message, f"❌ <b>SISTEM ERROR</b>\n<code>{exc}</code>", InlineKeyboardMarkup([[get_back_button()]])
+        )

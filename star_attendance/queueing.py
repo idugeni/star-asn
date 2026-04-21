@@ -49,3 +49,25 @@ def decode_queue_payload(raw_payload: Any) -> dict[str, Any]:
     if isinstance(raw_payload, dict):
         return raw_payload
     raise TypeError(f"Unsupported queue payload type: {type(raw_payload)!r}")
+
+
+async def enqueue_presence_task(nip: str, is_manual: bool = False, action: str = "in") -> None:
+    """
+    Enqueues an attendance task to pgqueuer.
+    """
+    from pgqueuer import Queries  # type: ignore
+    pool = await create_queue_pool()
+    try:
+        queries = Queries.from_asyncpg_pool(pool)
+        payload = {
+            "nip": nip,
+            "action": action,
+            "source": "manual_api" if is_manual else "scheduler_auto"
+        }
+        await queries.enqueue(
+            ["attendance.process"], 
+            [encode_queue_payload(payload)], 
+            [0]
+        )
+    finally:
+        await pool.close()

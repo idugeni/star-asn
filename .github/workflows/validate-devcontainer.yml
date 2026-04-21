@@ -1,0 +1,98 @@
+name: Validate Dev Container Config
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '.devcontainer/**'
+      - 'docker-compose*.yml'
+      - 'Dockerfile'
+      - '.github/workflows/validate-devcontainer.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - '.devcontainer/**'
+      - 'docker-compose*.yml'
+      - 'Dockerfile'
+
+jobs:
+  validate-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate docker-compose.yml syntax
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.dev.yml config --quiet
+
+      - name: Validate .devcontainer/devcontainer.json
+        run: |
+          python3 -m json.tool .devcontainer/devcontainer.json > /dev/null
+          echo "devcontainer.json is valid JSON"
+
+      - name: Check required .devcontainer files
+        run: |
+          test -f .devcontainer/devcontainer.json || exit 1
+          echo "✓ .devcontainer/devcontainer.json exists"
+
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (cache disabled)
+        run: |
+          docker compose -f docker-compose.yml build --no-cache --progress=plain api
+
+      - name: Test docker compose config with --pull always
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          echo "✓ docker-compose.yml is valid"
+
+      - name: Verify image was built
+        run: |
+          docker images | grep star-asn || exit 1
+          echo "✓ star-asn image built successfully"
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: star-asn:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: star-asn:latest
+          format: sarif
+          output: trivy-results.sarif
+        continue-on-error: true
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true

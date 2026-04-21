@@ -1,26 +1,86 @@
-.venv
-.pytest_cache
-.mypy_cache
-__pycache__
+# Python cache
+__pycache__/
 *.pyc
-.git
-.gitignore
-logs
-*.log
-.env
+*.pyo
+*.pyd
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+PIPFILE.lock
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
-*.egg-info
-dist
-build
-.mypy_cache
-node_modules
-web
-.vscode
-.idea
-tests
-tools
-supabase/.temp
+
+# Environment
+.env
+.env.local
+.env.*.local
+.venv
+venv/
+env/
+ENV/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Project specific
+logs/
+*.log
+tools/
+tests/
+supabase/.temp/
+web/
+node_modules/
 *.bat
 .env.example
 README.md
 pytest.ini
+
+# Docker/Build
+.docker/
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml

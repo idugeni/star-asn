@@ -20,7 +20,7 @@ from star_attendance.core.timeutils import (
     to_local,
 )
 from star_attendance.db.manager import db_manager
-from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserSession
+from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserSession, PersonalAllowance
 from star_attendance.db.types import AuditLogData, UserData
 
 DEFAULT_LOCATION_LATITUDE = -6.2210973
@@ -584,6 +584,11 @@ class SupabaseManager:
     # --- SESSION MANAGEMENT (POSTGRES BACKED) ---
 
     def save_user_session(self, nip: str, session_data: dict[str, Any]) -> None:
+        if not session_data or not session_data.get("cookies"):
+            print(f"Invalid or empty session data for {nip}. Deleting existing session if any.")
+            self.delete_user_session(nip)
+            return
+
         with db_manager.get_session() as session:
             user = session.query(User).filter(User.nip == nip).first()
             if not user:
@@ -1140,6 +1145,64 @@ class SupabaseManager:
 
     def is_mass_stop_requested(self) -> bool:
         return self.get_settings().get("mass_stop") == "1"
+
+    # --- PERSONAL ALLOWANCE OPERATIONS ---
+
+    def save_personal_allowance(self, nip: str, period_code: str, data: list[dict[str, Any]]) -> None:
+        with db_manager.get_session() as session:
+            user = session.query(User).filter(User.nip == nip).first()
+            user_id = user.id if user else None
+
+            # Delete existing records for this period to avoid duplicates
+            session.query(PersonalAllowance).filter(
+                PersonalAllowance.nip == nip, PersonalAllowance.period_code == period_code
+            ).delete()
+
+            for item in data:
+                date_str = item.get("date")
+                if not date_str:
+                    continue
+                try:
+                    dt = datetime.strptime(date_str, "%Y-%m-%d")
+                except ValueError:
+                    continue
+
+                allowance = PersonalAllowance(
+                    user_id=user_id,
+                    nip=nip,
+                    date=dt,
+                    clock_in=item.get("clock_in"),
+                    clock_out=item.get("clock_out"),
+                    daily_allowance_amount=item.get("daily_allowance_amount"),
+                    deduction_amount=item.get("deduction_amount"),
+                    total=item.get("total"),
+                    deduction_reason=item.get("deduction_reason"),
+                    period_code=period_code,
+                    updated_at=now_storage(),
+                )
+                session.add(allowance)
+            session.commit()
+
+    def get_personal_allowance(self, nip: str, period_code: str) -> list[dict[str, Any]]:
+        with db_manager.get_session() as session:
+            rows = (
+                session.query(PersonalAllowance)
+                .filter(PersonalAllowance.nip == nip, PersonalAllowance.period_code == period_code)
+                .order_by(PersonalAllowance.date.asc())
+                .all()
+            )
+            return [
+                {
+                    "date": row.date.strftime("%Y-%m-%d"),
+                    "clock_in": row.clock_in,
+                    "clock_out": row.clock_out,
+                    "daily_allowance_amount": row.daily_allowance_amount,
+                    "deduction_amount": row.deduction_amount,
+                    "total": row.total,
+                    "deduction_reason": row.deduction_reason,
+                }
+                for row in rows
+            ]
 
     def search_users(self, query: str) -> list[UserData]:
         db_settings = self.get_settings()

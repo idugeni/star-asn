@@ -52,9 +52,12 @@ async def get_main_menu(telegram_id: int) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📜 RIWAYAT", callback_data="view_history"),
+            InlineKeyboardButton("💰 TUNJANGAN", callback_data="view_allowance_menu"),
+        ],
+        [
+            InlineKeyboardButton("🕹️ ABSEN MANUAL", callback_data="start_manual"),
             InlineKeyboardButton("⚙️ PENGATURAN", callback_data="start_settings_menu"),
         ],
-        [InlineKeyboardButton("🕹️ ABSEN MANUAL", callback_data="start_manual")],
         [
             InlineKeyboardButton("📖 PANDUAN", callback_data="view_help"),
             InlineKeyboardButton("💬 SUPPORT", callback_data="view_support"),
@@ -66,8 +69,8 @@ async def get_main_menu(telegram_id: int) -> InlineKeyboardMarkup:
             [
                 [InlineKeyboardButton("─── 🛡️ ADMIN PANEL ───", callback_data="noop")],
                 [
-                    InlineKeyboardButton("🚀 MASSAL IN", callback_data="trigger_in"),
-                    InlineKeyboardButton("🏠 MASSAL OUT", callback_data="trigger_out"),
+                    InlineKeyboardButton("🚀 MASUK MASSAL", callback_data="trigger_in"),
+                    InlineKeyboardButton("🏠 PULANG MASSAL", callback_data="trigger_out"),
                 ],
                 [
                     InlineKeyboardButton("📊 TELEMETRI", callback_data="view_stats"),

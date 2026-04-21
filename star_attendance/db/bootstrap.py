@@ -17,6 +17,7 @@ REQUIRED_TABLES = (
     "attendance_job_locks",
     "attendance_dead_letters",
     "pgqueuer",
+    "personal_allowances",
 )
 
 

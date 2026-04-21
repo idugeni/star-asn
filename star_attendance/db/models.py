@@ -99,3 +99,22 @@ class GlobalSetting(Base):
     key = Column(String(100), primary_key=True)
     value = Column(Text)
     description = Column(String(255))
+
+
+class PersonalAllowance(Base):
+    __tablename__ = "personal_allowances"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    nip = Column(String(50), nullable=False, index=True)
+    date = Column(DateTime(timezone=True), nullable=False, index=True)
+    clock_in = Column(String(20))
+    clock_out = Column(String(20))
+    daily_allowance_amount = Column(String(50))
+    deduction_amount = Column(String(50))
+    total = Column(String(50))
+    deduction_reason = Column(Text, nullable=True)
+    period_code = Column(String(20), index=True)
+    updated_at = Column(DateTime(timezone=True), default=now_storage, onupdate=now_storage)
+
+    user = relationship("User")

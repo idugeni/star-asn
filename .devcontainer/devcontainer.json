@@ -1,0 +1,57 @@
+{
+  "name": "Star ASN Development",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "api",
+  "workspaceFolder": "/app",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.debugpy",
+        "charliermarsh.ruff",
+        "ms-vscode.makefile-tools",
+        "eamodio.gitlens",
+        "ms-docker.remote-containers",
+        "ms-docker.vscode-docker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.linting.enabled": true,
+        "python.linting.ruffEnabled": true,
+        "python.formatting.provider": "none",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+          }
+        },
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": [
+          "tests"
+        ]
+      }
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "remoteEnv": {
+    "PYTHONUNBUFFERED": "1",
+    "PYTHONPATH": "/app"
+  },
+  "forwardPorts": [8000],
+  "portAttributes": {
+    "8000": {
+      "label": "API",
+      "onAutoForward": "notify"
+    }
+  },
+  "postCreateCommand": "pip install -e '.[dev]'",
+  "postStartCommand": "python -m playwright install chromium",
+  "mounts": [
+    "source=${localEnv:HOME}/.ssh,target=/root/.ssh,readonly"
+  ]
+}

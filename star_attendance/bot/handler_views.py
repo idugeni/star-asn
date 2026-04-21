@@ -32,38 +32,40 @@ def _format_source(source: str | None) -> str:
 
 
 def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
-    header = f"<b>🛡️ {settings.BOT_NAME} CORE DASHBOARD</b>"
+    header = f"<b>🛡️ {settings.BOT_NAME} DASHBOARD UTAMA</b>"
     if user:
         last_actions = store.get_last_success_actions(str(user["nip"]))
         last_in_str = format_formal_timestamp(last_actions.get("in")) if last_actions.get("in") else "BELUM ADA"
         last_out_str = format_formal_timestamp(last_actions.get("out")) if last_actions.get("out") else "BELUM ADA"
         telegram_id = user.get("telegram_id") or "-"
-        auto_status = "ACTIVE" if user.get("auto_attendance_active") else "INACTIVE"
+        auto_status = "AKTIF" if user.get("auto_attendance_active") else "NONAKTIF"
         in_source = str(user.get("cron_in_source", "-")).upper()
         out_source = str(user.get("cron_out_source", "-")).upper()
-        in_label = f" ({in_source})" if in_source != "PERSONAL" else ""
-        out_label = f" ({out_source})" if out_source != "PERSONAL" else ""
+        
+        source_map = {"PERSONAL": "MANDIRI", "UPT": "KANTOR", "DEFAULT": "SISTEM"}
+        in_label = f" ({source_map.get(in_source, in_source)})" if in_source != "PERSONAL" else ""
+        out_label = f" ({source_map.get(out_source, out_source)})" if out_source != "PERSONAL" else ""
 
         body = (
-            "👤 <b>PERSONNEL DATA</b>\n"
-            f"  ├ NAME: <code>{user['nama']}</code>\n"
+            "👤 <b>DATA PERSONEL</b>\n"
+            f"  ├ NAMA: <code>{user['nama']}</code>\n"
             f"  ├ NIP: <code>{user['nip']}</code>\n"
-            f"  ├ TELEGRAM ID: <code>{telegram_id}</code>\n"
-            f"  └ UNIT: <code>{user.get('nama_upt', 'DEFAULT CLUSTER')}</code>\n\n"
-            "⏰ <b>OPERATIONAL SCHEDULE</b>\n"
-            f"  ├ AUTO-IN: <code>{user['cron_in']}</code>{in_label}\n"
-            f"  ├ AUTO-OUT: <code>{user['cron_out']}</code>{out_label}\n"
+            f"  ├ ID TELEGRAM: <code>{telegram_id}</code>\n"
+            f"  └ UNIT: <code>{user.get('nama_upt', 'CLUSTER DEFAULT')}</code>\n\n"
+            "⏰ <b>JADWAL OPERASIONAL</b>\n"
+            f"  ├ AUTO-MASUK: <code>{user['cron_in']}</code>{in_label}\n"
+            f"  ├ AUTO-PULANG: <code>{user['cron_out']}</code>{out_label}\n"
             f"  ├ HARI KERJA: <code>{user.get('workdays_label', '-')}</code>\n"
-            f"  ├ STATUS USER: <code>{'ACTIVE' if user.get('is_active', True) else 'INACTIVE'}</code>\n"
+            f"  ├ STATUS USER: <code>{'AKTIF' if user.get('is_active', True) else 'NONAKTIF'}</code>\n"
             f"  ├ STATUS AUTO ABSEN: <code>{auto_status}</code>\n"
             f"  └ INFO: <code>{user.get('auto_attendance_reason', '-')}</code>\n\n"
-            "📍 <b>LOKASI EFEKTIF</b>\n"
+            "📍 <b>LOKASI ABSENSI</b>\n"
             f"  ├ SUMBER: <code>{_format_source(str(user.get('location_source')))}</code>\n"
-            f"  ├ NAMA: <code>{user.get('location_label', user.get('nama_upt', '-'))}</code>\n"
+            f"  ├ NAMA LOKASI: <code>{user.get('location_label', user.get('nama_upt', '-'))}</code>\n"
             f"  └ KOORDINAT: <code>{_format_coords(user)}</code>\n\n"
-            "📊 <b>ACTIVITY INSIGHTS</b>\n"
-            f"  ├ LAST IN: <code>{last_in_str}</code>\n"
-            f"  └ LAST OUT: <code>{last_out_str}</code>"
+            "📊 <b>RINGKASAN AKTIVITAS</b>\n"
+            f"  ├ PRESENSI MASUK: <code>{last_in_str}</code>\n"
+            f"  └ PRESENSI PULANG: <code>{last_out_str}</code>"
         )
     else:
         body = "<i>⚠️ Administrator Mode: Session Active</i>"
@@ -173,8 +175,8 @@ def build_user_manage_keyboard(nip: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🗓 Hari Kerja", callback_data=f"edit_workdays_{nip}"),
         ],
         [
-            InlineKeyboardButton("📥 Absen Masuk", callback_data=f"force_in_{nip}"),
-            InlineKeyboardButton("📤 Absen Keluar", callback_data=f"force_out_{nip}"),
+            InlineKeyboardButton("📥 Presensi Masuk", callback_data=f"force_in_{nip}"),
+            InlineKeyboardButton("📤 Presensi Pulang", callback_data=f"force_out_{nip}"),
         ],
         [InlineKeyboardButton("🗑️ Hapus Personel", callback_data=f"edit_del_{nip}")],
         [InlineKeyboardButton("◀️ Kembali ke Daftar", callback_data="view_users_list_0")],

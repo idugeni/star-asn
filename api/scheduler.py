@@ -148,7 +148,7 @@ class AttendanceScheduler:
         logger.info(f"Triggering personal {action.upper()} for {fresh_user['nip']}")
 
         # Define a status callback to send live updates to Telegram
-        msg_id_container = {"id": None}
+        msg_id_container: dict[str, int | None] = {"id": None}
         tid = fresh_user.get("telegram_id")
 
         async def status_callback(status_msg: str):
