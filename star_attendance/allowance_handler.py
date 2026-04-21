@@ -138,28 +138,50 @@ class AllowanceHandler:
 async def sync_user_allowance(nip: str) -> dict[str, Any]:
     """
     High-level function to sync user allowance data from portal to Supabase.
+    Includes automatic session recovery (login) if needed.
     """
     from star_attendance.runtime import get_store
     store = get_store()
     
-    # 1. Get Session
-    session_data = store.get_user_session(nip)
-    if not session_data:
-        return {"status": "failed", "message": "no_session"}
-    
     user_cred = store.get_user_data(nip)
     if not user_cred:
-        return {"status": "failed", "message": "no_user"}
-
-    # 2. Setup Handler
-    handler = LoginHandler(proxy=cast(str | None, user_cred.get("proxy")))
-    # Restore cookies
-    for name, value in session_data.get("cookies", {}).items():
-        handler.client.cookies.set(name, value, domain="star-asn.kemenimipas.go.id")
+        return {"status": "failed", "message": "User data not found."}
     
+    password = user_cred.get("password")
+    proxy = cast(str | None, user_cred.get("proxy"))
+    
+    # 1. Setup Handler
+    handler = LoginHandler(proxy=proxy)
+    
+    # 2. Try with existing session first
+    session_data = store.get_user_session(nip)
+    if session_data and "cookies" in session_data:
+        for name, value in session_data["cookies"].items():
+            handler.client.cookies.set(name, value, domain="star-asn.kemenimipas.go.id")
+        
+        allowance_handler = AllowanceHandler(handler)
+        period_code, year = allowance_handler.get_current_period_code()
+        
+        result = await allowance_handler.fetch_allowance_data(period_code, year)
+        if result.get("status") == "success":
+            store.save_personal_allowance(nip, period_code, result["data"])
+            return {"status": "success", "period": period_code, "count": len(result["data"])}
+        
+        # If failed due to something else than session, or session expired, proceed to login
+        if result.get("message") != "session_expired":
+             return result
+
+    # 3. Perform Full Login (Session missing or expired)
+    if not password:
+        return {"status": "failed", "message": "Password is required for session recovery."}
+    
+    login_res = await handler.login(nip, password)
+    if login_res.get("status") != "success":
+        return {"status": "failed", "message": f"Login failed: {login_res.get('message')}"}
+    
+    # 4. Retry Fetch with new session
     allowance_handler = AllowanceHandler(handler)
     period_code, year = allowance_handler.get_current_period_code()
-    
     result = await allowance_handler.fetch_allowance_data(period_code, year)
     
     if result.get("status") == "success" and "data" in result:
