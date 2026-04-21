@@ -830,7 +830,7 @@ class LoginHandler:
                         await asyncio.sleep(1)
                         img_bytes = await captcha_img.screenshot()
                         
-                        ocr_candidates = await self._get_two_best_candidates(img_bytes, 0.2)
+                        ocr_candidates = await self._get_best_candidates(img_bytes)
                         if not ocr_candidates:
                             log("WARN", f"event=waf_browser status=ocr_failed attempt={login_attempt}")
                             last_failure_stage = "captcha_failed"

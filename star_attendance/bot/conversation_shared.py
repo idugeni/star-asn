@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any
 
@@ -9,7 +8,6 @@ from telegram import Update
 from star_attendance.database_manager import WORKDAY_ALIASES, WORKDAY_PRESETS, normalize_workdays
 from star_attendance.runtime import get_store
 
-logger = logging.getLogger(__name__)
 store = get_store()
 
 def validate_nip(nip: Any) -> str:
