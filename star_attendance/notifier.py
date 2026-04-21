@@ -28,9 +28,9 @@ def _code(value: Any, default: str = "-") -> str:
 def _action_label(action: str, *, automated: bool = False) -> str:
     normalized = str(action).lower()
     if normalized == "in":
-        return "PRESENSI MASUK" + (" (OTOMATIS)" if automated else "")
+        return "PRESENSI MASUK"
     if normalized == "out":
-        return "PRESENSI PULANG" + (" (OTOMATIS)" if automated else "")
+        return "PRESENSI PULANG"
     return html.escape(str(action).upper(), quote=False)
 
 

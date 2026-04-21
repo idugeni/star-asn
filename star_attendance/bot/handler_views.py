@@ -42,9 +42,8 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
         in_source = str(user.get("cron_in_source", "-")).upper()
         out_source = str(user.get("cron_out_source", "-")).upper()
         
-        source_map = {"PERSONAL": "MANDIRI", "UPT": "KANTOR", "DEFAULT": "SISTEM"}
-        in_label = f" ({source_map.get(in_source, in_source)})" if in_source != "PERSONAL" else ""
-        out_label = f" ({source_map.get(out_source, out_source)})" if out_source != "PERSONAL" else ""
+        in_label = ""
+        out_label = ""
 
         body = (
             "👤 <b>DATA PERSONEL</b>\n"

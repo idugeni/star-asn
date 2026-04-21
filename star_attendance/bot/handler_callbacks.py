@@ -106,9 +106,8 @@ async def _show_profile(message: Message, *, services: CallbackServices, tid: in
     in_source = str(user.get("cron_in_source", "-")).upper()
     out_source = str(user.get("cron_out_source", "-")).upper()
 
-    # Remove (PERSONAL) label if source is personal
-    in_label = f" ({in_source})" if in_source != "PERSONAL" else ""
-    out_label = f" ({out_source})" if out_source != "PERSONAL" else ""
+    in_label = ""
+    out_label = ""
 
     response = (
         "<b>🆔 PROFIL DIGITAL ASN</b>\n────────────────\n"

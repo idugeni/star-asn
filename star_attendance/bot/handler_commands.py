@@ -267,8 +267,8 @@ async def profil_command(
     auto_status = "ACTIVE" if user.get("auto_attendance_active") else "INACTIVE"
     in_source = str(user.get("cron_in_source", "-")).upper()
     out_source = str(user.get("cron_out_source", "-")).upper()
-    in_label = f" ({in_source})" if in_source != "PERSONAL" else ""
-    out_label = f" ({out_source})" if out_source != "PERSONAL" else ""
+    in_label = ""
+    out_label = ""
 
     message = (
         "<b>👤 PROFIL PERSONEL</b>\n────────────────\n"
