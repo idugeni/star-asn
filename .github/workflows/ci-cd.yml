@@ -8,7 +8,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: yourusername/star-asn
+  IMAGE_NAME: eliyantosarage/star-asn
 
 jobs:
   test:

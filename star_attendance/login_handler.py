@@ -62,7 +62,7 @@ def get_context_prefix() -> str:
     return f"ctx={ctx} " if ctx else ""
 
 
-MASTER_IDENTITY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+MASTER_IDENTITY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 MASTER_IDENTITY_HEADERS = {
     "User-Agent": MASTER_IDENTITY_UA,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
@@ -71,7 +71,7 @@ MASTER_IDENTITY_HEADERS = {
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
     "DNT": "1",
-    "Sec-Ch-Ua": '"Google Chrome";v="147", "Chromium";v="147", "Not.A/Brand";v="24"',
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not.A/Brand";v="24"',
     "Sec-Ch-Ua-Mobile": "?0",
     "Sec-Ch-Ua-Platform": '"Windows"',
     "Sec-Fetch-Dest": "document",
@@ -83,14 +83,11 @@ MASTER_IDENTITY_HEADERS = {
 }
 
 
+from star_attendance.core.utils import log as core_log, set_context as core_set_context
+
 def log(level: str, msg: str) -> None:
-    colors = {"INFO": Fore.BLUE, "WARN": Fore.YELLOW, "ERROR": Fore.RED, "SUCCESS": Fore.GREEN}
-    color = colors.get(level, Fore.WHITE)
-    with print_lock:
-        print(
-            f"{Fore.CYAN}[{get_timestamp()}] {color}[{level}] {Fore.MAGENTA}[{LOG_SCOPE}] {Style.RESET_ALL}{get_context_prefix()}{msg}",
-            flush=True,
-        )
+    # Bridge to the unified logging system in core.utils
+    core_log(level, msg, scope="AUTH")
 
 
 class LoginHandler:
@@ -235,7 +232,19 @@ class LoginHandler:
 
     def _is_waf_interstitial(self, html: str, title: str = "") -> bool:
         normalized = f"{title}\n{html}".lower()
-        return ("security check" in normalized and "waf" in normalized) or "document.cookie='waf_token" in normalized
+        return any(
+            marker in normalized
+            for marker in (
+                "security check",
+                "waf",
+                "document.cookie='waf_token",
+                "just a moment",
+                "cf-browser-verification",
+                "checking your browser",
+                "attention required",
+                "cloudflare",
+            )
+        )
 
     def _is_login_form_ready_html(self, html: str) -> bool:
         return all(marker in html for marker in ('name="tkv"', 'name="username"', 'name="password"'))
@@ -295,23 +304,26 @@ class LoginHandler:
         
         # 1. Baseline raw
         res1 = self.ocr.classification(image_bytes)
-        code1 = str(res1).upper()
+        code1 = str(res1).strip().upper()
         if self._is_valid_code(code1):
             candidates.append((1.0, code1, "raw"))
+        else:
+            log("DEBUG", f"OCR raw prediction invalid: '{code1}'")
             
         # 2. Enhanced (Greyscale/Contrast)
         variant = self.preprocess_image(image_bytes)
         if variant is not None:
             _, enc = cv2.imencode(".png", variant)
             res2 = self.ocr.classification(enc.tobytes())
-            code2 = str(res2).upper()
+            code2 = str(res2).strip().upper()
             if self._is_valid_code(code2) and code2 not in [c[1] for c in candidates]:
                 candidates.append((0.9, code2, "enhanced"))
+            elif code2 != code1:
+                log("DEBUG", f"OCR enhanced prediction invalid or duplicate: '{code2}'")
         
-        # 3. Aggressive (Thresholding)
-        # If we still need one more, try a different threshold or logic
-        # For now, let's keep it 2 or 3 by trying another preprocessing if needed
-        # Or just return whatever we have. ddddocr is usually good enough with 2 variants.
+        if not candidates:
+            log("WARN", "No valid captcha candidates found after dual-pass OCR.")
+            
         return candidates[:3]
 
     async def _fetch_captcha_bytes(self):
@@ -327,7 +339,8 @@ class LoginHandler:
             return None
 
     def _is_valid_code(self, code):
-        if not code or len(code) != 6:
+        clean_code = str(code or "").strip()
+        if not clean_code or len(clean_code) != 6:
             return False
         return True
 
@@ -376,7 +389,7 @@ class LoginHandler:
     async def solve_captcha_bytes(self, image_bytes, mode="baseline"):
         try:
             res = self.ocr.classification(image_bytes)
-            res = str(res).upper()
+            res = str(res).strip().upper()
             if self._is_valid_code(res):
                 return {"prediction": res, "confidence": 1.0, "error": None}
             else:
@@ -384,7 +397,7 @@ class LoginHandler:
                 if variant is not None:
                     _, encoded_img = cv2.imencode(".png", variant)
                     res2 = self.ocr.classification(encoded_img.tobytes())
-                    res2 = str(res2).upper()
+                    res2 = str(res2).strip().upper()
                     if self._is_valid_code(res2):
                         return {"prediction": res2, "confidence": 0.9, "error": None}
                 log("WARN", f"Captcha prediction invalid format: {res}")
@@ -716,6 +729,10 @@ class LoginHandler:
                                 session_source="HTTP",
                             )
                         failure_reason = dashboard_message
+                        if self._is_waf_interstitial(response_body):
+                            failure_reason = "WAF aktif terdeteksi pada response POST."
+                        elif not failure_reason:
+                            failure_reason = f"Response portal tidak valid (HTTP {r_post.status_code})"
 
             except Exception as e:
                 log("ERROR", f"event=login exception={e}")

@@ -12,7 +12,7 @@ services:
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.letsencrypt.acme.email=your-email@example.com"
+      - "--certificatesresolvers.letsencrypt.acme.email=officialelsa21@gmail.com"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
     ports:
       - "80:80"
@@ -25,7 +25,7 @@ services:
       - star-asn-network
     deploy:
       placement:
-        constraints: [node.role == manager]
+        constraints: [ node.role == manager ]
       restart_policy:
         condition: on-failure
 
@@ -35,10 +35,10 @@ services:
     networks:
       - star-asn-network
     environment:
-      - INTERNAL_API_URL=https://api.yourdomain.com
+      - "INTERNAL_API_URL=https://api.star-asn.id"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`api.yourdomain.com`)"
+      - "traefik.http.routers.api.rule=Host(`api.star-asn.id`)"
       - "traefik.http.routers.api.entrypoints=web,websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
@@ -61,13 +61,13 @@ services:
       - portainer_data:/data
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.portainer.rule=Host(`portainer.yourdomain.com`)"
+      - "traefik.http.routers.portainer.rule=Host(`admin.star-asn.id`)"
       - "traefik.http.routers.portainer.entrypoints=websecure"
       - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
       - "traefik.http.services.portainer.loadbalancer.server.port=9000"
     deploy:
       placement:
-        constraints: [node.role == manager]
+        constraints: [ node.role == manager ]
 
   grafana:
     image: grafana/grafana:latest
@@ -79,7 +79,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=Star@ASN2026!
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=Host(`grafana.yourdomain.com`)"
+      - "traefik.http.routers.grafana.rule=Host(`monitor.star-asn.id`)"
       - "traefik.http.routers.grafana.entrypoints=websecure"
       - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"

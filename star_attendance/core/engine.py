@@ -542,7 +542,7 @@ class AttendanceEngine:
                         ("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8"),
                         ("X-Requested-With", "XMLHttpRequest"),
                         ("KV-TOKEN", str(self.csrf_token)),
-                        ("Sec-Ch-Ua", '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"'),
+                        ("Sec-Ch-Ua", '"Google Chrome";v="131", "Chromium";v="131", "Not.A/Brand";v="24"'),
                         ("Sec-Ch-Ua-Mobile", "?0"),
                         ("Sec-Ch-Ua-Platform", '"Windows"'),
                         ("Origin", self.base_url),
