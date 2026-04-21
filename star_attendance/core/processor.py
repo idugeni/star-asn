@@ -1,6 +1,7 @@
 import asyncio
 import time
 import uuid
+import json
 from collections.abc import Callable, Coroutine, Mapping
 from typing import Any
 
@@ -108,8 +109,12 @@ async def process_single_user(
     engine = AttendanceEngine(action=action, nip=nip, status_callback=status_callback)
     try:
         if store.has_successful_attendance_today(nip, action):
+            from star_attendance.core.timeutils import format_precise_time
             recorded_at, _ = _safe_last_success_record(store, nip, action)
-            store.add_audit_log(nip, action, "skipped", "Attendance already recorded successfully today.")
+            time_str = format_precise_time(recorded_at)
+            label = "Presensi Masuk" if action.lower() == "in" else "Presensi Pulang"
+            
+            store.add_audit_log(nip, action, "skipped", f"Attendance {label} already recorded successfully today.")
 
             # Formatted message for Admin/Logs
             full_msg = notifier.format_attendance_msg(
@@ -119,7 +124,7 @@ async def process_single_user(
                 "skipped",
                 recorded_at=recorded_at,
                 telegram_id=user_chat_id,
-                detail=f"Absensi {action.upper()} untuk NIP {nip} sudah tercatat pada hari ini.",
+                detail=f"Absensi {label} untuk NIP {nip} sudah tercatat pada hari ini.",
                 trace_id=request_key,
             )
 
@@ -139,9 +144,7 @@ async def process_single_user(
                         "recorded_at": recorded_at,
                         "event_time": recorded_at,
                         "action": action,
-                        "detail": f"Anda sudah melakukan {action.upper()} hari ini pada pukul {recorded_at.strftime('%H:%M:%S')}."
-                        if recorded_at
-                        else "Sudah tercatat.",
+                        "detail": f"Anda sudah melakukan {label} hari ini pada pukul {time_str}.",
                     },
                 )
 
@@ -293,17 +296,19 @@ async def process_single_user(
     return result, full_msg
 
 
-async def mass_attendance(limit=None, options=None):
+async def mass_attendance(limit: int | None = None, options: Any = None) -> dict[str, Any]:
+    """
+    Orchestrates mass attendance by enqueuing jobs to PostgreSQL via PgQueuer.
+    """
     store = options.store if getattr(options, "store", None) else get_store()
-    options.store = store
     users = store.get_users_with_passwords()
-
+    
     if limit:
         users = users[:limit]
 
     if not users:
         warning("Tidak ada personil terdaftar untuk absen masal.", scope=options.action.upper())
-        return
+        return {"queued": 0}
 
     action = options.action
     scope = action.upper()
@@ -315,13 +320,22 @@ async def mass_attendance(limit=None, options=None):
 
     # --- "MASTER OF MASTER" PRIMING ---
     from star_attendance.login_handler import LoginHandler
-
     await LoginHandler.prime_waf_globally()
 
     pool = await create_queue_pool()
     queries = await require_queue_schema(pool)
 
     count = 0
+    # Reset progress indicators for workers
+    store.update_mass_status({
+        "active": "1",
+        "action": action,
+        "pos": "0",
+        "total": str(len(users)),
+        "log": "[]",
+        "start_time": str(time.time())
+    })
+
     batch_size = 100
     try:
         for start in range(0, len(users), batch_size):
@@ -345,34 +359,16 @@ async def mass_attendance(limit=None, options=None):
             priorities = [0] * len(batch)
             await queries.enqueue(entrypoints, payloads, priorities)
             count += len(batch)
-
-            # Update live status after each batch dispatch.
-            status_data = {
-                "active": "1",
-                "action": action,
-                "pos": str(count),
-                "total": str(len(users)),
-                "last_nip": batch[-1]["nip"],
-                "start_time": str(mass_start),
-            }
-            store.update_mass_status(status_data)
     finally:
-        store.update_mass_status(
-            {
-                "active": "0",
-                "action": action,
-                "pos": str(count),
-                "total": str(len(users)),
-            }
-        )
         await pool.close()
 
     # Log mass orchestration summary to audit log
+    label = "PRESENSI MASUK" if action.lower() == "in" else "PRESENSI PULANG"
     store.add_audit_log(
         nip="SYSTEM",
         action=f"mass_{action}",
         status="ok",
-        message=f"Mass {action.upper()} Dispatched. Total Personnel: {count} workers enqueued.",
+        message=f"Mass {label} Dispatched. Total Personnel: {count} workers enqueued.",
     )
 
     print_sync(

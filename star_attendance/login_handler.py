@@ -18,7 +18,6 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 import ddddocr  # type: ignore
 import numpy as np
 from colorama import Fore, Style, init
-from curl_cffi import CurlMime  # type: ignore
 from curl_cffi.requests import AsyncSession  # type: ignore
 
 from star_attendance.core.config import settings
@@ -63,7 +62,12 @@ def get_context_prefix() -> str:
     return f"ctx={ctx} " if ctx else ""
 
 
-MASTER_IDENTITY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+TKV_REGEX = re.compile(r'name="tkv" value="([^"]+)"')
+CSRF_REGEX = re.compile(r'name="csrf-token" content="([^"]+)"')
+USER_NAME_REGEX = re.compile(r'class="user-name-text">([^<]+)<')
+
+
+MASTER_IDENTITY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 MASTER_IDENTITY_HEADERS = {
     "User-Agent": MASTER_IDENTITY_UA,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
@@ -72,7 +76,7 @@ MASTER_IDENTITY_HEADERS = {
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
     "DNT": "1",
-    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not.A/Brand";v="24"',
+    "Sec-Ch-Ua": '"Google Chrome";v="147", "Chromium";v="147", "Not.A/Brand";v="24"',
     "Sec-Ch-Ua-Mobile": "?0",
     "Sec-Ch-Ua-Platform": '"Windows"',
     "Sec-Fetch-Dest": "document",
@@ -222,11 +226,20 @@ class LoginHandler:
     def _apply_cookie_payload(self, cookies: list[CookieData] | None) -> None:
         for cookie in cookies or []:
             try:
+                name = cookie.get("name")
+                value = cookie.get("value")
+                if not name or value is None:
+                    continue
+                    
+                # Use provided domain, or fallback to the base domain
+                domain = cookie.get("domain") or "star-asn.kemenimipas.go.id"
+                path = cookie.get("path") or "/"
+                
                 self.client.cookies.set(
-                    cookie["name"],
-                    cookie["value"],
-                    domain=cookie.get("domain", "star-asn.kemenimipas.go.id"),
-                    path=cookie.get("path", "/"),
+                    name,
+                    value,
+                    domain=domain,
+                    path=path,
                 )
             except Exception:
                 continue
@@ -251,7 +264,16 @@ class LoginHandler:
         return all(marker in html for marker in ('name="tkv"', 'name="username"', 'name="password"'))
 
     def _is_dashboard_html(self, html: str) -> bool:
-        return 'class="user-name-text"' in html and 'name="csrf-token"' in html
+        # Modern markers
+        if 'class="user-name-text"' in html and 'name="csrf-token"' in html:
+            return True
+        # Title markers (Fallback)
+        if '<title>Statistik | STAR ASN</title>' in html or '<title>Dashboard | STAR ASN</title>' in html:
+            return True
+        # Identity markers
+        if 'href="https://star-asn.kemenimipas.go.id/authentication/logout"' in html:
+            return True
+        return False
 
     def _message_is_invalid_credentials(self, message: str | None) -> bool:
         normalized = str(message or "").lower()
@@ -408,18 +430,23 @@ class LoginHandler:
             return {"prediction": None, "confidence": None, "error": f"exception:{e}"}
 
     async def _verify_dashboard_session(self) -> tuple[bool, str]:
+        """Confirm session is valid by reaching the dashboard."""
         try:
-            resp = await self.client.get(f"{self.base_url}/home/dashboard")
-        except Exception as e:
-            return False, f"Gagal memuat dashboard: {e}"
-
-        if "login" in str(resp.url).lower() or "<title>login" in resp.text.lower():
-            return False, "Portal mengarahkan kembali ke halaman login."
-        if resp.status_code >= 400:
-            return False, f"Dashboard mengembalikan HTTP {resp.status_code}."
-        if not self._is_dashboard_html(resp.text):
+            resp = await self.client.get(f"{self.base_url}/home/dashboard", timeout=30.0)
+            
+            # Check for redirect or login page
+            if "login" in str(resp.url).lower() or "<title>login" in resp.text.lower():
+                log("WARN", f"event=session_verify status=invalid reason=redirected_to_login url={resp.url}")
+                return False, "Portal mengarahkan kembali ke halaman login."
+            
+            if self._is_dashboard_html(resp.text):
+                return True, "Dashboard tervalidasi."
+                
+            log("WARN", f"event=session_verify status=invalid reason=marker_missing title='{resp.text[:50]}...'")
             return False, "Marker dashboard tidak ditemukan setelah login."
-        return True, "Dashboard tervalidasi."
+        except Exception as e:
+            log("ERROR", f"event=session_verify status=error message={e}")
+            return False, f"Gagal verifikasi dashboard: {e}"
 
     async def ensure_portal_ready(
         self,
@@ -582,7 +609,7 @@ class LoginHandler:
                         except Exception:
                             pass
 
-                start_time = datetime.now()
+                perf_start = time.perf_counter()
                 r_init = await self.client.get(login_url)
 
                 if self._is_dashboard_html(r_init.text):
@@ -594,7 +621,7 @@ class LoginHandler:
                             "success",
                             message="Sesi dashboard aktif.",
                             cookies=self.client.cookies.get_dict(),
-                            response_time=(datetime.now() - start_time).total_seconds(),
+                            response_time=time.perf_counter() - perf_start,
                             session_source="PERSISTENT",
                         )
 
@@ -614,10 +641,10 @@ class LoginHandler:
                         return bootstrap_result
                     continue
 
-                try:
-                    tkv = r_init.text.split('name="tkv" value="')[1].split('"')[0]
-                except Exception:
+                match = TKV_REGEX.search(r_init.text)
+                if not match:
                     continue
+                tkv = match.group(1)
 
                 image_bytes = await self._fetch_captcha_bytes()
                 if image_bytes is None: continue
@@ -630,27 +657,30 @@ class LoginHandler:
                     if status_callback:
                         await status_callback(f"🧩 Memecahkan Captcha: <b>{code}</b>")
 
-                    mp = CurlMime()
-                    mp.addpart(name="tkv", data=tkv)
-                    mp.addpart(name="username", data=username)
-                    mp.addpart(name="password", data=password)
-                    mp.addpart(name="kv-captcha", data=code)
+                    payload = {
+                        "tkv": tkv,
+                        "username": username,
+                        "password": password,
+                        "kv-captcha": code,
+                    }
                     request_start_time = time.time()
                     r_post = await self.client.post(
                         login_url,
-                        multipart=mp,
+                        data=payload,
                         headers={
                             "X-Requested-With": "XMLHttpRequest", 
                             "Origin": self.base_url, 
                             "Referer": login_url,
-                            "Accept": "application/json, text/javascript, */*; q=0.01"
+                            "Accept": "application/json, text/javascript, */*; q=0.01",
+                            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
                         },
                         timeout=30.0,
                     )
-                    response_time = time.time() - request_start_time
-
+                    response_time = time.time()
                     try:
                         res = r_post.json()
+                        response_message = res.get("message")
+                        
                         if res.get("status") == "success":
                             if status_callback:
                                 await status_callback("🏠 Memverifikasi akses dashboard...")
@@ -660,79 +690,66 @@ class LoginHandler:
                                 await portal_circuit_breaker.record_success()
                                 return self._build_result(
                                     "success",
-                                    message="Login berhasil dan dashboard tervalidasi.",
+                                    message="Login berhasil.",
                                     cookies=self.client.cookies.get_dict(),
-                                    response_time=response_time,
+                                    response_time=time.time() - start_time_total,
                                     attempts=attempt,
                                     captcha_code=code,
                                     session_source="HTTP",
                                 )
                             failure_reason = dashboard_message
+                        elif self._message_is_captcha_failure(response_message):
+                            failure_reason = "Captcha portal tidak valid."
+                            continue
+                        elif self._message_is_invalid_credentials(response_message):
                             return self._build_result(
                                 "failed",
-                                message=dashboard_message,
-                                session_source="HTTP",
-                                failure_stage="dashboard_unreachable",
-                                captcha_code=code,
-                                attempts=attempt,
-                            )
-
-                        response_message = str(res.get("message") or "login_failed")
-                        if self._message_is_captcha_failure(response_message):
-                            failure_reason = "Captcha portal tidak valid."
-                            continue
-                        if self._message_is_invalid_credentials(response_message):
-                            return self._build_result(
-                                "terminal",
-                                message=response_message,
+                                message=response_message or "Kredensial salah.",
                                 session_source="HTTP",
                                 failure_stage="invalid_credentials",
                                 captcha_code=code,
                                 attempts=attempt,
                             )
-                        failure_reason = response_message
-                        return self._build_result(
-                            "failed",
-                            message=failure_reason,
-                            session_source="HTTP",
-                            failure_stage="dashboard_unreachable",
-                            captcha_code=code,
-                            attempts=attempt,
-                        )
+                        else:
+                            failure_reason = response_message or "Login gagal (Response JSON status != success)"
                     except Exception:
                         response_body = r_post.text
-                        if self._message_is_invalid_credentials(response_body):
-                            return self._build_result(
-                                "terminal",
-                                message="NIP atau password portal tidak valid.",
-                                session_source="HTTP",
-                                failure_stage="invalid_credentials",
-                                captcha_code=code,
-                                attempts=attempt,
-                            )
-                        if self._message_is_captcha_failure(response_body):
-                            failure_reason = "Captcha portal tidak valid."
-                            continue
-                        if status_callback:
-                            await status_callback("🏠 Memverifikasi akses dashboard...")
+                        # 1. Check for WAF challenge
+                        if self._is_waf_interstitial(response_body):
+                            log("WARN", "event=login status=waf_detected_on_post action=emergency_bootstrap")
+                            if status_callback: await status_callback("🛡️ WAF terdeteksi pada POST, memicu bypass...")
+                            await self._bootstrap_portal_session_via_browser(status_callback)
+                            continue 
+                        
+                        # 2. Check if we were redirected to dashboard (Fallback for non-JSON 302)
                         dashboard_ok, dashboard_message = await self._verify_dashboard_session()
                         if dashboard_ok:
                             log("SUCCESS", "event=login status=success redirect=true dashboard=verified")
                             await portal_circuit_breaker.record_success()
                             return self._build_result(
                                 "success",
-                                message="Login berhasil dan dashboard tervalidasi.",
+                                message="Login berhasil (Redirect).",
                                 cookies=self.client.cookies.get_dict(),
-                                response_time=response_time,
+                                response_time=time.time() - start_time_total,
                                 attempts=attempt,
                                 captcha_code=code,
                                 session_source="HTTP",
                             )
-                        failure_reason = dashboard_message
-                        if self._is_waf_interstitial(response_body):
-                            failure_reason = "WAF aktif terdeteksi pada response POST."
-                        elif not failure_reason:
-                            failure_reason = f"Response portal tidak valid (HTTP {r_post.status_code})"
+                            
+                        # 3. Check for specific text-based errors
+                        if self._message_is_captcha_failure(response_body):
+                            failure_reason = "Captcha portal tidak valid."
+                            continue
+                        if self._message_is_invalid_credentials(response_body):
+                            return self._build_result(
+                                "failed",
+                                message="NIP atau password portal tidak valid.",
+                                session_source="HTTP",
+                                failure_stage="invalid_credentials",
+                                captcha_code=code,
+                                attempts=attempt,
+                            )
+                        failure_reason = dashboard_message or "Response portal tidak valid (Bukan JSON)."
 
             except Exception as e:
                 log("ERROR", f"event=login exception={e}")
@@ -908,12 +925,13 @@ class LoginHandler:
                 if username and reached_dashboard:
                     try:
                         from star_attendance.runtime import get_store
+                        from star_attendance.core.timeutils import now_local
                         store = get_store()
                         store.save_user_session(
                             username,
                             {
                                 "cookies": {c["name"]: c["value"] for c in formatted},
-                                "captured_at": datetime.now().isoformat(),
+                                "captured_at": now_local().isoformat(),
                                 "user_agent": self.user_agent,
                             },
                         )

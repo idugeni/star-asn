@@ -183,6 +183,8 @@ class TelegramNotifier:
         ]
 
         if recorded_at is not None:
+            from star_attendance.core.timeutils import format_formal_date
+            lines.append(f"📅 <b>TANGGAL:</b> <code>{format_formal_date(recorded_at)}</code>")
             lines.append(f"⏰ <b>JAM ABSENSI:</b> <code>{format_precise_time(recorded_at)}</code>")
 
         lines.append(f"⏱ <b>DURASI:</b> <code>{duration:.2f}s</code>")
@@ -222,7 +224,8 @@ class TelegramNotifier:
 
         # Friendly Tone for User Notif
         greeting = "Halo"
-        hour = datetime.now().hour
+        from star_attendance.core.timeutils import now_local
+        hour = now_local().hour
         if 0 <= hour < 5:
             greeting = "Selamat Dini Hari"
         elif 5 <= hour < 11:
@@ -246,6 +249,8 @@ class TelegramNotifier:
         ]
 
         if recorded_at is not None:
+            from star_attendance.core.timeutils import format_formal_date
+            lines.append(f"📅 <b>Tanggal:</b> <code>{format_formal_date(recorded_at)}</code>")
             lines.append(f"⏰ <b>Waktu:</b> <code>{format_precise_time(recorded_at)}</code>")
 
         lines.append(f"⏱ <b>Proses:</b> <code>{duration:.2f} detik</code>")
@@ -288,6 +293,8 @@ class TelegramNotifier:
             f"{icon} <b>STATUS:</b> {status_text}",
         ]
         if recorded_at is not None:
+            from star_attendance.core.timeutils import format_formal_date
+            lines.append(f"📅 <b>DATE:</b> <code>{format_formal_date(recorded_at)}</code>")
             lines.append(f"⏰ <b>RECORDED AT:</b> <code>{format_precise_time(recorded_at)}</code>")
         if detail:
             lines.append(f"💬 <b>DETAIL:</b> {_escape_text(detail)}")

@@ -1198,11 +1198,44 @@ class SupabaseManager:
             "in_failed": int(values.get("mass_in_failed", 0)),
             "out_success": int(values.get("mass_out_success", 0)),
             "out_failed": int(values.get("mass_out_failed", 0)),
+            "log": values.get("mass_log", "[]"),
         }
 
     def update_mass_status(self, data: dict[str, Any]) -> None:
         for key, value in data.items():
             self.set_setting(f"mass_{key}", str(value))
+
+    def increment_mass_pos(self) -> int:
+        """Atomically increments the mass attendance progress position."""
+        with db_manager.get_session() as session:
+            session.execute(
+                text(
+                    "INSERT INTO global_settings (key, value) VALUES ('mass_pos', '1') "
+                    "ON CONFLICT (key) DO UPDATE SET value = (global_settings.value::int + 1)::text"
+                )
+            )
+            session.commit()
+            res = session.execute(text("SELECT value FROM global_settings WHERE key = 'mass_pos'")).scalar()
+            return int(res or 0)
+
+    def add_mass_log(self, nip: str, name: str, status: str) -> None:
+        """Adds a log entry to the rolling mass attendance log (max 5 entries)."""
+        import json
+        with db_manager.get_session() as session:
+            current = session.execute(text("SELECT value FROM global_settings WHERE key = 'mass_log'")).scalar()
+            logs = json.loads(str(current)) if current else []
+            
+            status_emoji = "✅" if status == "success" else "❌" if status == "failed" else "⚠️"
+            entry = f"{status_emoji} {name[:12]} ({nip[-4:]}) - {status.upper()}"
+            
+            logs.insert(0, entry)
+            logs = logs[:5]  # Keep only last 5
+            
+            session.execute(
+                text("INSERT INTO global_settings (key, value) VALUES ('mass_log', :val) ON CONFLICT (key) DO UPDATE SET value = :val"),
+                {"val": json.dumps(logs)}
+            )
+            session.commit()
 
     def trigger_mass_stop(self) -> None:
         self.set_setting("mass_stop", "1")

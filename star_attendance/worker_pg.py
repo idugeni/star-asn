@@ -51,8 +51,17 @@ async def main():
         try:
             result, _ = await process_single_user(user_data, options, 1, 1, is_mass=True)
             logger.info(f"event=task_complete nip={nip} success={result} request_key={request_key}")
+            
+            # Real-time UI updates
+            if source == "mass_dispatch":
+                store.increment_mass_pos()
+                store.add_mass_log(nip, user_data.get("nama", "Unknown"), "success" if result else "failed")
+                
         except Exception as e:
             logger.error(f"event=task_error nip={nip} request_key={request_key} error={e}")
+            if source == "mass_dispatch":
+                store.increment_mass_pos()
+                store.add_mass_log(nip, user_data.get("nama", "Unknown"), "failed")
 
     logger.info("Worker Cluster Online. Listening for PostgreSQL notifications...")
     try:

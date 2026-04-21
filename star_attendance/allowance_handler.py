@@ -17,7 +17,8 @@ class AllowanceHandler:
 
     @staticmethod
     def get_current_period_code() -> tuple[str, int]:
-        now = datetime.now()
+        from star_attendance.core.timeutils import now_local
+        now = now_local()
         day = now.day
         if day >= 15:
             start_month = now.month
