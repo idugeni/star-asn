@@ -229,30 +229,7 @@ async def _show_manage_user(message: Message, *, services: CallbackServices, tid
     if not user:
         return
 
-    loc_indicator = "MANDIRI" if user.get("location_source") == "personal" else "SISTEM"
-    sched_indicator = (
-        "KHUSUS"
-        if user.get("cron_in_source") == "personal" or user.get("cron_out_source") == "personal"
-        else "STANDAR"
-    )
-    work_indicator = "KHUSUS" if user.get("workdays_source") == "personal" else "GLOBAL"
-
-    response = (
-        f"<b>🛠 MANAJEMEN: {user['nama']}</b>\n"
-        f"────────────────\n"
-        f"🆔 <b>NIP:</b> <code>{user['nip']}</code>\n"
-        f"🏢 <b>UPT:</b> <code>{user.get('nama_upt')}</code>\n"
-        f"🔑 <b>PASS:</b> <code>{user.get('password')}</code>\n"
-        f"────────────────\n"
-        f"📍 <b>LOKASI:</b> {loc_indicator}\n"
-        f"   └ <code>{user.get('latitude')}, {user.get('longitude')}</code>\n"
-        f"⏰ <b>JAM KERJA:</b> {sched_indicator}\n"
-        f"   └ <code>{user.get('cron_in')}</code> - <code>{user.get('cron_out')}</code>\n"
-        f"🗓 <b>HARI KERJA:</b> {work_indicator}\n"
-        f"   └ <code>{user.get('workdays_label')}</code>\n"
-        f"────────────────\n"
-        "Pilih field yang ingin diubah:"
-    )
+    response = build_manage_user_message(user)
     await services.edit_message(message, response, build_user_manage_keyboard(target_nip))
 
 

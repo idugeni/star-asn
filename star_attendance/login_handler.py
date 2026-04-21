@@ -290,12 +290,29 @@ class LoginHandler:
         enhanced = clahe.apply(gray)
         return cv2.convertScaleAbs(enhanced, alpha=1.2, beta=0)
 
-    async def _get_two_best_candidates(self, image_bytes, min_conf):
-        res = await self.solve_captcha_bytes(image_bytes)
-        pred = res.get("prediction")
-        if pred:
-            return [(1.0, pred, "ddddocr")]
-        return []
+    async def _get_best_candidates(self, image_bytes, min_conf=0.1):
+        candidates = []
+        
+        # 1. Baseline raw
+        res1 = self.ocr.classification(image_bytes)
+        code1 = str(res1).upper()
+        if self._is_valid_code(code1):
+            candidates.append((1.0, code1, "raw"))
+            
+        # 2. Enhanced (Greyscale/Contrast)
+        variant = self.preprocess_image(image_bytes)
+        if variant is not None:
+            _, enc = cv2.imencode(".png", variant)
+            res2 = self.ocr.classification(enc.tobytes())
+            code2 = str(res2).upper()
+            if self._is_valid_code(code2) and code2 not in [c[1] for c in candidates]:
+                candidates.append((0.9, code2, "enhanced"))
+        
+        # 3. Aggressive (Thresholding)
+        # If we still need one more, try a different threshold or logic
+        # For now, let's keep it 2 or 3 by trying another preprocessing if needed
+        # Or just return whatever we have. ddddocr is usually good enough with 2 variants.
+        return candidates[:3]
 
     async def _fetch_captcha_bytes(self):
         url = f"{self.base_url}/authentication/captcha"
@@ -591,7 +608,7 @@ class LoginHandler:
                 image_bytes = await self._fetch_captcha_bytes()
                 if image_bytes is None: continue
                 
-                candidates = await self._get_two_best_candidates(image_bytes, settings.CAPTCHA_MIN_CONF)
+                candidates = await self._get_best_candidates(image_bytes)
                 if not candidates: continue
                 
                 for index, (conf, code, mode) in enumerate(candidates, start=1):
@@ -599,12 +616,23 @@ class LoginHandler:
                     if status_callback:
                         await status_callback(f"🧩 Memecahkan Captcha: <b>{code}</b>")
 
-                    data = {"tkv": tkv, "username": username, "password": password, "kv-captcha": code}
+                    data = {
+                        "tkv": (None, tkv),
+                        "username": (None, username),
+                        "password": (None, password),
+                        "kv-captcha": (None, code)
+                    }
                     request_start_time = time.time()
                     r_post = await self.client.post(
                         login_url,
-                        data=data,
-                        headers={"X-Requested-With": "XMLHttpRequest", "Origin": self.base_url, "Referer": login_url},
+                        files=data,
+                        headers={
+                            "X-Requested-With": "XMLHttpRequest", 
+                            "Origin": self.base_url, 
+                            "Referer": login_url,
+                            "Accept": "application/json, text/javascript, */*; q=0.01"
+                        },
+                        timeout=30.0,
                     )
                     response_time = time.time() - request_start_time
 

@@ -18,7 +18,13 @@ from star_attendance.bot.constants import (
 )
 from star_attendance.runtime import get_internal_api_client
 
-from .conversation_shared import GLOBAL_SETTING_LABELS, store, validate_global_setting
+from .conversation_shared import GLOBAL_SETTING_LABELS, store, validate_global_setting, validate_nip
+from .handler_views import (
+    build_global_settings_message,
+    build_manage_user_message,
+    build_user_manage_keyboard,
+    get_global_settings_keyboard,
+)
 from .ui import get_upt_keyboard, is_admin
 
 internal_api = get_internal_api_client()
@@ -187,9 +193,12 @@ async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         updated = store.update_global_settings({field: parsed_value})
         if update.message:
+            header = f"✅ <b>GLOBAL SETTING {field.upper()} DIPERBARUI</b>\n────────────────\n"
+            body = build_global_settings_message(store=store)
             await update.message.reply_text(
-                f"✅ Global setting <code>{field}</code> diperbarui menjadi <code>{updated.get(field)}</code>.",
+                f"{header}{body}",
                 parse_mode="HTML",
+                reply_markup=get_global_settings_keyboard(),
             )
         await _sync_scheduler_notice(update)
         return ConversationHandler.END
@@ -207,7 +216,7 @@ async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     success = False
     try:
         if field == "nip":
-            success = store.rename_user_nip(target_nip, new_value)
+            success = store.rename_user_nip(target_nip, validate_nip(new_value))
         elif field == "loc":
             if new_value.upper() == "DEFAULT":
                 success = store.update_user_settings(
@@ -244,7 +253,17 @@ async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return WAIT_ADMIN_INPUT_VAL
 
     if success and update.message:
-        await update.message.reply_text(f"✅ Data <code>{field.upper()}</code> berhasil diperbarui.", parse_mode="HTML")
+        refreshed_user = store.get_user_by_nip(new_value if field == "nip" else target_nip)
+        if refreshed_user:
+            header = f"✅ <b>DATA {field.upper()} BERHASIL DIPERBARUI</b>\n────────────────\n"
+            body = build_manage_user_message(refreshed_user)
+            await update.message.reply_text(
+                f"{header}{body}",
+                parse_mode="HTML",
+                reply_markup=build_user_manage_keyboard(refreshed_user["nip"]),
+            )
+        else:
+            await update.message.reply_text(f"✅ Data <code>{field.upper()}</code> berhasil diperbarui.", parse_mode="HTML")
         await _sync_scheduler_notice(update)
     elif update.message:
         await update.message.reply_text("❌ Gagal memperbarui data. Pastikan target valid.")

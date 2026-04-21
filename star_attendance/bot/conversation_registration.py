@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from star_attendance.bot.constants import WAIT_REG_NAME, WAIT_REG_NIP, WAIT_REG_PASS, WAIT_REG_UPT
 from star_attendance.runtime import get_internal_api_client
 
-from .conversation_shared import store
+from .conversation_shared import store, validate_nip
 from .ui import get_upt_keyboard
 
 internal_api = get_internal_api_client()
@@ -32,7 +32,12 @@ async def reg_nip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.message or not update.message.text or not update.effective_user:
         return WAIT_REG_NIP
 
-    nip = update.message.text.strip()
+    try:
+        nip = validate_nip(update.message.text)
+    except ValueError as exc:
+        await update.message.reply_text(f"❌ {exc}")
+        return WAIT_REG_NIP
+
     existing = store.get_user_by_nip(nip)
     tid = update.effective_user.id
 

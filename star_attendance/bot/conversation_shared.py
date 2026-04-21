@@ -12,6 +12,13 @@ from star_attendance.runtime import get_store
 logger = logging.getLogger(__name__)
 store = get_store()
 
+def validate_nip(nip: Any) -> str:
+    """Validates NIP format (must be 18 digits)."""
+    raw = str(nip).strip()
+    if not re.fullmatch(r"\d{18}", raw):
+        raise ValueError("NIP harus terdiri dari 18 digit angka.")
+    return raw
+
 TIME_RE = re.compile(r"^\d{2}:\d{2}$")
 GLOBAL_SETTING_LABELS = {
     "default_location": "LOKASI DEFAULT",

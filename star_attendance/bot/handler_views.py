@@ -183,6 +183,38 @@ def build_user_manage_keyboard(nip: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+def build_manage_user_message(user: UserPayload) -> str:
+    loc_indicator = "MANDIRI" if user.get("location_source") == "personal" else "SISTEM"
+    sched_indicator = (
+        "KHUSUS"
+        if user.get("cron_in_source") == "personal" or user.get("cron_out_source") == "personal"
+        else "STANDAR"
+    )
+    work_indicator = "KHUSUS" if user.get("workdays_source") == "personal" else "GLOBAL"
+    
+    coords = (
+        f"{float(user['latitude']):.6f}, {float(user['longitude']):.6f}"
+        if user.get("latitude") is not None and user.get("longitude") is not None
+        else "BELUM DISET"
+    )
+
+    response = (
+        f"<b>🛠 MANAJEMEN: {user['nama']}</b>\n"
+        f"────────────────\n"
+        f"🆔 <b>NIP:</b> <code>{user['nip']}</code>\n"
+        f"🏢 <b>UPT:</b> <code>{user.get('nama_upt', 'DEFAULT')}</code>\n"
+        f"🔑 <b>PASS:</b> <code>{user.get('password')}</code>\n"
+        f"────────────────\n"
+        f"📍 <b>LOKASI:</b> {loc_indicator}\n"
+        f"   └ <code>{coords}</code>\n"
+        f"⏰ <b>JAM KERJA:</b> {sched_indicator}\n"
+        f"   └ <code>{user.get('cron_in')}</code> - <code>{user.get('cron_out')}</code>\n"
+        f"🗓 <b>HARI KERJA:</b> {work_indicator}\n"
+        f"   └ <code>{user.get('workdays_label', '-')}</code>"
+    )
+    return response
+
+
 async def edit_smart(message: Message, text: str, reply_markup: Any = None) -> None:
     try:
         if message.photo or message.caption:

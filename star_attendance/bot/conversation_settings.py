@@ -36,12 +36,17 @@ async def _sync_scheduler() -> tuple[bool, str | None]:
 
 
 async def _show_dashboard(message: Message, user: UserData, sync_error: str | None = None) -> None:
-    header = "✅ Pengaturan berhasil diperbarui."
+    status_header = "✅ <b>PENGATURAN BERHASIL DIPERBARUI</b>\n"
     if sync_error:
-        header += f"\n⚠️ Sinkronisasi scheduler belum berhasil: <code>{sync_error}</code>"
-    await message.reply_text(header, parse_mode=constants.ParseMode.HTML, reply_markup=ReplyKeyboardRemove())
+        status_header += f"⚠️ <i>Sinkronisasi scheduler tertunda: {sync_error}</i>\n"
+    status_header += "────────────────\n"
+
+    dashboard_body = build_dashboard_message(user, store=store)
+    # Combine header and body
+    combined_message = f"{status_header}{dashboard_body}"
+
     await message.reply_text(
-        build_dashboard_message(user, store=store),
+        combined_message,
         parse_mode=constants.ParseMode.HTML,
         reply_markup=await get_main_menu(user["telegram_id"] or 0),
     )
