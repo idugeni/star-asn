@@ -191,29 +191,32 @@ class AttendanceEngine:
                 username, password, action=self.action, location=self.location, status_callback=self.status_callback
             )
 
-            if login_result and "cookies" in login_result:
-                self.last_failure_stage = login_result.get("failure_stage")
+            if login_result:
+                # MAP TECHNICAL INDICATORS FOR TELEMETRY (ALWAYS)
+                self.last_failure_stage = login_result.get("failure_stage") or self.last_failure_stage
                 self.last_session_source = login_result.get("session_source", "NEW")
                 self.last_attempts = login_result.get("attempts", 1)
-                self.last_captcha = login_result.get("captcha_code", "N/A")
+                self.last_captcha = login_result.get("captcha_code") or self.last_captcha
                 self.last_waf_status = login_result.get("waf_status", "ACTIVE")
-                self.last_public_ip = login_result.get("public_ip", "N/A")
+                self.last_public_ip = login_result.get("public_ip") or self.last_public_ip
                 self.last_user_agent = login_result.get("user_agent", self.user_agent)
-                self._apply_cookies(login_result["cookies"])
                 self.last_response_time = login_result.get("response_time", 0.0)
 
-                # Check if attendance was already done via Browser Bridge
-                if login_result.get("attendance_result") is True:
-                    self.store.save_user_session(
-                        username,
-                        {
-                            "cookies": self.client.cookies.get_dict(),
-                            "captured_at": isoformat_local(),
-                            "user_agent": self.user_agent,
-                        },
-                    )
-                    self._accumulated_logs = stop_log_collection()
-                    return "COMPLETED"
+                if "cookies" in login_result:
+                    self._apply_cookies(login_result["cookies"])
+
+                    # Check if attendance was already done via Browser Bridge
+                    if login_result.get("attendance_result") is True:
+                        self.store.save_user_session(
+                            username,
+                            {
+                                "cookies": self.client.cookies.get_dict(),
+                                "captured_at": isoformat_local(),
+                                "user_agent": self.user_agent,
+                            },
+                        )
+                        self._accumulated_logs = stop_log_collection()
+                        return "COMPLETED"
 
                 # Verify after login
                 if await self.fetch_user_profile():
@@ -319,18 +322,27 @@ class AttendanceEngine:
             )
 
             if login_result:
+                # MAP TECHNICAL INDICATORS FOR TELEMETRY (ALWAYS)
+                self.last_session_source = login_result.get("session_source", "NEW")
+                self.last_attempts = login_result.get("attempts", 1)
+                self.last_captcha = login_result.get("captcha_code") or self.last_captcha
+                self.last_waf_status = login_result.get("waf_status", "ACTIVE")
+                self.last_public_ip = login_result.get("public_ip") or self.last_public_ip
+                self.last_user_agent = login_result.get("user_agent", self.user_agent)
+                self.last_failure_stage = login_result.get("failure_stage") or self.last_failure_stage
+                self.last_response_time = login_result.get("response_time", 0.0)
+
                 if login_result.get("status") == "terminal":
                     msg = login_result.get("message") or "Terminal login failure"
                     error(f"KEGAGALAN TERMINAL: {msg}", scope=self.scope)
                     self._accumulated_logs = stop_log_collection()
                     return f"TERMINAL:{msg}"
                 if login_result.get("status") == "circuit_open":
-                    self.last_failure_stage = login_result.get("failure_stage") or self.last_failure_stage
                     warning("Portal circuit breaker sedang aktif. Menunda percobaan login.", scope=self.scope)
                     self._accumulated_logs = stop_log_collection()
                     return "CIRCUIT_OPEN"
 
-                if login_result and "cookies" in login_result:
+                if "cookies" in login_result:
                     cookies = login_result["cookies"]
                     if cookies and isinstance(cookies, list):
                         self._session_source = "BRIDGE"
@@ -349,24 +361,12 @@ class AttendanceEngine:
                             except Exception:
                                 continue
                     self._apply_cookies(login_result["cookies"])
-                    self.last_response_time = login_result.get("response_time", 0.0)
-
-                    # MAP TECHNICAL INDICATORS FOR TELEMETRY
-                    self.last_session_source = login_result.get("session_source", "NEW")
-                    self.last_attempts = login_result.get("attempts", 1)
-                    self.last_captcha = login_result.get("captcha_code", "N/A")
-                    self.last_waf_status = login_result.get("waf_status", "ACTIVE")
-                    self.last_public_ip = login_result.get("public_ip", "N/A")
-                    self.last_user_agent = login_result.get("user_agent", self.user_agent)
-                    self.last_failure_stage = login_result.get("failure_stage")
 
                     # THE "SUCCESS TOTAL" SHORTCUT
                     if login_result.get("attendance_result") is True:
                         # Specific source for browser bypass
                         self.last_session_source = "BRIDGE-NATIVE"
                         self.last_waf_status = "BYPASSED"
-                        self.last_public_ip = login_result.get("public_ip", "N/A")
-                        self.last_user_agent = login_result.get("user_agent", self.user_agent)
                         self.store.save_user_session(
                             self.nip,
                             {
@@ -382,22 +382,19 @@ class AttendanceEngine:
                         self._accumulated_logs = stop_log_collection()
                         return "COMPLETED"
 
-                    if await self.fetch_user_profile():
-                        self.store.save_user_session(
-                            self.nip,
-                            {
-                                "cookies": self.client.cookies.get_dict(),
-                                "captured_at": isoformat_local(),
-                                "user_agent": self.user_agent,
-                            },
-                        )
-                        success(f"Login otomatis berhasil ({self.last_response_time:.2f}s).", scope=self.scope)
-                        self._accumulated_logs = stop_log_collection()
-                        return True
-                    self.last_failure_stage = "dashboard_unreachable"
-
-            if login_result:
-                self.last_failure_stage = login_result.get("failure_stage") or self.last_failure_stage
+                if await self.fetch_user_profile():
+                    self.store.save_user_session(
+                        self.nip,
+                        {
+                            "cookies": self.client.cookies.get_dict(),
+                            "captured_at": isoformat_local(),
+                            "user_agent": self.user_agent,
+                        },
+                    )
+                    success(f"Login otomatis berhasil ({self.last_response_time:.2f}s).", scope=self.scope)
+                    self._accumulated_logs = stop_log_collection()
+                    return True
+                self.last_failure_stage = "dashboard_unreachable"
 
             failure_msg = self._resolve_login_failure_message(login_result)
             if login_result and login_result.get("status") == "success":

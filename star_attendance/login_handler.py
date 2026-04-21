@@ -99,6 +99,7 @@ class LoginHandler:
     _waf_lock = asyncio.Lock()
     _last_browser_tkv: str | None = None  # Captured from browser during bypass
     _ocr_init_lock = threading.Lock()
+    _public_ip: str = "N/A"
 
     def __init__(
         self,
@@ -161,12 +162,22 @@ class LoginHandler:
         attempts: int | None = None,
         captcha_code: str | None = None,
         attendance_result: bool | None = None,
+        public_ip: str | None = None,
     ) -> dict[str, Any]:
+        waf_status = "ACTIVE"
+        if cookies:
+            waf_cookies = self._extract_shared_waf_cookies(cookies if isinstance(cookies, list) else [])
+            if waf_cookies:
+                waf_status = "BYPASSED"
+
         result: dict[str, Any] = {
             "status": status,
             "message": message,
             "session_source": session_source,
             "failure_stage": failure_stage,
+            "waf_status": waf_status,
+            "public_ip": public_ip or self.__class__._public_ip,
+            "user_agent": self.user_agent,
         }
         if cookies is not None:
             result["cookies"] = cookies
@@ -527,6 +538,12 @@ class LoginHandler:
 
         for attempt in range(1, max_attempts + 1):
             try:
+                if LoginHandler._public_ip == "N/A":
+                    try:
+                        ip_resp = await self.client.get("https://api.ipify.org", timeout=5)
+                        LoginHandler._public_ip = ip_resp.text.strip()
+                    except Exception: pass
+
                 start_time = datetime.now()
                 r_init = await self.client.get(login_url)
 
@@ -552,8 +569,12 @@ class LoginHandler:
                     r_init = await self.client.get(login_url)
 
                 if not self._is_login_form_ready_html(r_init.text):
-                    log("WARN", "event=login_form status=missing action=escalating_to_browser")
-                    return await self._run_browser_login_fallback(username, password, action, location, status_callback, start_time)
+                    log("WARN", "event=login_form status=missing action=emergency_bootstrap")
+                    bootstrap_result = await self._bootstrap_portal_session_via_browser(status_callback)
+                    if bootstrap_result.get("status") != "success":
+                        clear_context()
+                        return bootstrap_result
+                    continue
 
                 try:
                     tkv = r_init.text.split('name="tkv" value="')[1].split('"')[0]
@@ -604,6 +625,8 @@ class LoginHandler:
                                 message=dashboard_message,
                                 session_source="HTTP",
                                 failure_stage="dashboard_unreachable",
+                                captcha_code=code,
+                                attempts=attempt,
                             )
 
                         response_message = str(res.get("message") or "login_failed")
@@ -616,6 +639,8 @@ class LoginHandler:
                                 message=response_message,
                                 session_source="HTTP",
                                 failure_stage="invalid_credentials",
+                                captcha_code=code,
+                                attempts=attempt,
                             )
                         failure_reason = response_message
                         return self._build_result(
@@ -623,6 +648,8 @@ class LoginHandler:
                             message=failure_reason,
                             session_source="HTTP",
                             failure_stage="dashboard_unreachable",
+                            captcha_code=code,
+                            attempts=attempt,
                         )
                     except Exception:
                         response_body = r_post.text
@@ -632,6 +659,8 @@ class LoginHandler:
                                 message="NIP atau password portal tidak valid.",
                                 session_source="HTTP",
                                 failure_stage="invalid_credentials",
+                                captcha_code=code,
+                                attempts=attempt,
                             )
                         if self._message_is_captcha_failure(response_body):
                             failure_reason = "Captcha portal tidak valid."
@@ -657,7 +686,11 @@ class LoginHandler:
                 log("ERROR", f"event=login exception={e}")
                 await asyncio.sleep(1)
 
-        return await self._run_browser_login_fallback(username, password, action, location, status_callback)
+        return self._build_result(
+            "failed",
+            message=failure_reason or "Gagal login setelah beberapa percobaan.",
+            session_source="HTTP",
+        )
 
     async def _run_browser_login_fallback(self, username, password, action, location, status_callback, start_time=None):
         log("STEP", "event=emergency_bridge status=launching")
