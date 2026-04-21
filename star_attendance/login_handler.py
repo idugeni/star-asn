@@ -630,15 +630,15 @@ class LoginHandler:
                         await status_callback(f"🧩 Memecahkan Captcha: <b>{code}</b>")
 
                     data = {
-                        "tkv": (None, tkv),
-                        "username": (None, username),
-                        "password": (None, password),
-                        "kv-captcha": (None, code)
+                        "tkv": tkv,
+                        "username": username,
+                        "password": password,
+                        "kv-captcha": code,
                     }
                     request_start_time = time.time()
                     r_post = await self.client.post(
                         login_url,
-                        files=data,
+                        multipart=data,
                         headers={
                             "X-Requested-With": "XMLHttpRequest", 
                             "Origin": self.base_url, 
