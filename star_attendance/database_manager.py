@@ -268,7 +268,7 @@ class SupabaseManager:
     def _encrypt_password(self, raw_password: str | None) -> str | None:
         if raw_password is None:
             return None
-        password = str(raw_password).strip()
+        password = str(raw_password)
         if not password:
             return ""
         if password.startswith("gAAAA"):
