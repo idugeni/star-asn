@@ -632,6 +632,12 @@ class LoginHandler:
                     if bootstrap_result.get("status") != "success":
                         clear_context()
                         return bootstrap_result
+                    
+                    # Sync cookies back to client
+                    if "cookies" in bootstrap_result:
+                        for c in bootstrap_result["cookies"]:
+                             self.client.cookies.set(c["name"], c["value"], domain="star-asn.kemenimipas.go.id")
+
                     r_init = await self.client.get(login_url)
 
                 if not self._is_login_form_ready_html(r_init.text):
@@ -640,6 +646,12 @@ class LoginHandler:
                     if bootstrap_result.get("status") != "success":
                         clear_context()
                         return bootstrap_result
+                    
+                    # Sync cookies back to client
+                    if "cookies" in bootstrap_result:
+                        for c in bootstrap_result["cookies"]:
+                             self.client.cookies.set(c["name"], c["value"], domain="star-asn.kemenimipas.go.id")
+
                     continue
 
                 match = TKV_REGEX.search(r_init.text)
@@ -771,12 +783,17 @@ class LoginHandler:
             username=username, password=password, action=action, location=location
         )
         if isinstance(res_browser, dict) and res_browser.get("status") == "success":
-            LoginHandler.cache_shared_waf_cookies(cast(list[CookieData] | None, res_browser.get("cookies")))
+            cookies = res_browser.get("cookies")
+            if cookies:
+                for c in cookies:
+                     self.client.cookies.set(c["name"], c["value"], domain="star-asn.kemenimipas.go.id")
+
+            LoginHandler.cache_shared_waf_cookies(cast(list[CookieData] | None, cookies))
             await portal_circuit_breaker.record_success()
             return self._build_result(
                 "success",
                 message="Login browser berhasil dan dashboard tervalidasi.",
-                cookies=res_browser.get("cookies"),
+                cookies=cookies,
                 attendance_result=res_browser.get("attendance_result"),
                 session_source="BRIDGE",
             )
