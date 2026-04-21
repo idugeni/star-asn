@@ -540,9 +540,16 @@ class LoginHandler:
             try:
                 if LoginHandler._public_ip == "N/A":
                     try:
+                        # Try ipify first
                         ip_resp = await self.client.get("https://api.ipify.org", timeout=5)
                         LoginHandler._public_ip = ip_resp.text.strip()
-                    except Exception: pass
+                    except Exception:
+                        try:
+                            # Fallback if ipify is blocked or down
+                            ip_resp = await self.client.get("https://ifconfig.me", timeout=5)
+                            LoginHandler._public_ip = ip_resp.text.strip()
+                        except Exception:
+                            pass
 
                 start_time = datetime.now()
                 r_init = await self.client.get(login_url)

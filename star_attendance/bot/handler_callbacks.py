@@ -229,13 +229,13 @@ async def _show_manage_user(message: Message, *, services: CallbackServices, tid
     if not user:
         return
 
-    loc_indicator = "📍 (Real)" if user.get("location_source") == "personal" else "🌐 (Default)"
+    loc_indicator = "MANDIRI" if user.get("location_source") == "personal" else "SISTEM"
     sched_indicator = (
-        "⏰ (Custom)"
+        "KHUSUS"
         if user.get("cron_in_source") == "personal" or user.get("cron_out_source") == "personal"
-        else "🗓 (Sistem)"
+        else "STANDAR"
     )
-    work_indicator = "🗓 (Custom)" if user.get("workdays_source") == "personal" else "🌍 (Global)"
+    work_indicator = "KHUSUS" if user.get("workdays_source") == "personal" else "GLOBAL"
 
     response = (
         f"<b>🛠 MANAJEMEN: {user['nama']}</b>\n"
