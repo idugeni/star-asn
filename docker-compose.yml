@@ -3,16 +3,6 @@ x-build: &star-asn-build
   dockerfile: Dockerfile
   target: runtime
 
-x-develop: &star-asn-develop
-  watch:
-    - action: rebuild
-      path: pyproject.toml
-    - action: sync+restart
-      path: api/
-      target: /app/api
-    - action: sync+restart
-      path: star_attendance/
-      target: /app/star_attendance
 
 x-runtime-env: &star-asn-runtime-env
   PYTHONUNBUFFERED: "1"
@@ -45,7 +35,6 @@ services:
 
   api:
     <<: *star-asn-service
-    develop: *star-asn-develop
     container_name: star-asn-api
     environment:
       <<: *star-asn-runtime-env
@@ -71,7 +60,6 @@ services:
 
   worker:
     <<: *star-asn-service
-    develop: *star-asn-develop
     container_name: star-asn-worker
     environment:
       <<: *star-asn-runtime-env
@@ -89,7 +77,6 @@ services:
 
   bot:
     <<: *star-asn-service
-    develop: *star-asn-develop
     container_name: star-asn-bot
     environment:
       <<: *star-asn-runtime-env
