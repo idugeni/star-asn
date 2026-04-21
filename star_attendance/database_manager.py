@@ -19,6 +19,7 @@ from star_attendance.core.timeutils import (
     now_utc,
     to_local,
 )
+from star_attendance.db.enums import AuditAction, AuditStatus
 from star_attendance.db.manager import db_manager
 from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserSession, PersonalAllowance
 from star_attendance.db.types import AuditLogData, UserData
@@ -159,6 +160,22 @@ def get_workday_label(value: Any) -> str:
 def get_workday_cron(value: Any) -> str:
     key = normalize_workdays(value)
     return WORKDAY_PRESETS.get(key, WORKDAY_PRESETS[DEFAULT_WORKDAYS])["cron"]
+
+
+def _normalize_audit_action(value: str | AuditAction) -> str:
+    raw_value = value.value if isinstance(value, AuditAction) else str(value).strip()
+    try:
+        return AuditAction(raw_value).value
+    except ValueError as exc:
+        raise ValueError(f"Unsupported audit action: {value}") from exc
+
+
+def _normalize_audit_status(value: str | AuditStatus) -> str:
+    raw_value = value.value if isinstance(value, AuditStatus) else str(value).strip()
+    try:
+        return AuditStatus(raw_value).value
+    except ValueError as exc:
+        raise ValueError(f"Unsupported audit status: {value}") from exc
 
 
 def _is_valid_time_text(value: str) -> bool:
@@ -527,20 +544,45 @@ class SupabaseManager:
         return True
 
     def rename_user_nip(self, old_nip: str, new_nip: str) -> bool:
+        old_nip = str(old_nip).strip()
+        new_nip = str(new_nip).strip()
+        if not old_nip or not new_nip:
+            return False
+
         with db_manager.get_session() as session:
             user = session.query(User).filter(User.nip == old_nip).first()
             if not user:
                 return False
-            user.nip = str(new_nip)
-            session.add(user)
+
+            user_id = user.id
+            user.nip = new_nip
+            session.query(UserSession).filter(UserSession.nip == old_nip).update(
+                {"nip": new_nip}, synchronize_session=False
+            )
+            session.query(AuditLog).filter(AuditLog.nip == old_nip).update(
+                {"nip": new_nip}, synchronize_session=False
+            )
+            session.query(PersonalAllowance).filter(PersonalAllowance.nip == old_nip).update(
+                {"nip": new_nip}, synchronize_session=False
+            )
+            session.execute(
+                text("UPDATE public.attendance_job_locks SET nip = :new_nip WHERE nip = :old_nip"),
+                {"old_nip": old_nip, "new_nip": new_nip},
+            )
+            session.execute(
+                text("UPDATE public.attendance_dead_letters SET nip = :new_nip WHERE nip = :old_nip"),
+                {"old_nip": old_nip, "new_nip": new_nip},
+            )
+            self._add_audit_log_entry(
+                session,
+                nip=new_nip,
+                action=AuditAction.rename_nip,
+                status=AuditStatus.success,
+                message=f"Personnel NIP renamed from {old_nip} to {new_nip}",
+                user_id=user_id,
+            )
 
         self._invalidate_user_cache()
-        self.add_audit_log(
-            nip=str(new_nip),
-            action="rename_nip",
-            status="success",
-            message=f"Personnel NIP renamed from {old_nip} to {new_nip}",
-        )
         return True
 
     def get_users_with_passwords(self) -> list[UserData]:
@@ -627,25 +669,50 @@ class SupabaseManager:
     def add_audit_log(
         self,
         nip: str,
-        action: str,
-        status: str,
+        action: str | AuditAction,
+        status: str | AuditStatus,
         message: str,
         response_time: float | None = None,
     ) -> None:
         with db_manager.get_session() as session:
-            user = session.query(User).filter(User.nip == nip).first()
-            user_id = user.id if user else None
-
-            session.add(
-                AuditLog(
-                    user_id=user_id,
-                    nip=nip,
-                    action=action,
-                    status=status,
-                    message=message,
-                    response_time=response_time,
-                )
+            self._add_audit_log_entry(
+                session,
+                nip=nip,
+                action=action,
+                status=status,
+                message=message,
+                response_time=response_time,
             )
+
+    def _add_audit_log_entry(
+        self,
+        session: Any,
+        *,
+        nip: str,
+        action: str | AuditAction,
+        status: str | AuditStatus,
+        message: str,
+        response_time: float | None = None,
+        user_id: Any | None = None,
+    ) -> None:
+        normalized_nip = str(nip)
+        normalized_action = _normalize_audit_action(action)
+        normalized_status = _normalize_audit_status(status)
+        resolved_user_id = user_id
+        if resolved_user_id is None:
+            user = session.query(User).filter(User.nip == normalized_nip).first()
+            resolved_user_id = user.id if user else None
+
+        session.add(
+            AuditLog(
+                user_id=resolved_user_id,
+                nip=normalized_nip,
+                action=normalized_action,
+                status=normalized_status,
+                message=message,
+                response_time=response_time,
+            )
+        )
 
     def get_last_success_action(self, nip: str, action: str) -> tuple[datetime | None, str | None]:
         with db_manager.get_session() as session:

@@ -27,6 +27,14 @@ from star_attendance.core.utils import (
 from star_attendance.login_handler import CookieData, LoginHandler, MASTER_IDENTITY_HEADERS, MASTER_IDENTITY_UA
 from star_attendance.runtime import get_store
 
+LOGIN_FAILURE_STAGE_MESSAGES = {
+    "dashboard_unreachable": "Dashboard tidak bisa diverifikasi setelah login.",
+    "invalid_credentials": "NIP atau password portal tidak valid.",
+    "captcha_failed": "Captcha portal tidak valid.",
+    "login_form_unavailable": "Form login portal tidak tersedia.",
+    "waf_timeout": "WAF timeout sebelum form login tersedia.",
+}
+
 
 class AttendanceEngine:
     def __init__(
@@ -124,6 +132,29 @@ class AttendanceEngine:
             return
         raise TypeError(f"Unsupported cookie payload type: {type(cookies).__name__}")
 
+    def _resolve_login_failure_message(
+        self,
+        login_result: Mapping[str, Any] | None,
+        *,
+        default: str = "Unknown login failure",
+    ) -> str:
+        if not login_result:
+            return default
+
+        message = login_result.get("message")
+        if message not in (None, ""):
+            return str(message)
+
+        failure_stage = str(login_result.get("failure_stage") or "").strip()
+        if failure_stage:
+            return LOGIN_FAILURE_STAGE_MESSAGES.get(failure_stage, f"Login gagal ({failure_stage})")
+
+        status = str(login_result.get("status") or "").strip()
+        if status:
+            return "Login gagal." if status in {"failed", "error"} else f"Login gagal ({status})"
+
+        return default
+
     async def perform_login(self, username, password):
         """Perform login with session fallback and action passing for session continuity"""
         start_log_collection()
@@ -212,7 +243,10 @@ class AttendanceEngine:
                 self._accumulated_logs = stop_log_collection()
                 return "CIRCUIT_OPEN"
 
-            failure_msg = login_result.get("message") if login_result else "Unknown login failure"
+            if login_result:
+                self.last_failure_stage = login_result.get("failure_stage") or self.last_failure_stage
+
+            failure_msg = self._resolve_login_failure_message(login_result)
             if login_result and login_result.get("status") == "success":
                 failure_msg = "Dashboard tidak bisa diverifikasi setelah login."
             error(f"Gagal login untuk {username}: {failure_msg}", scope=self.scope)
@@ -291,6 +325,7 @@ class AttendanceEngine:
                     self._accumulated_logs = stop_log_collection()
                     return f"TERMINAL:{msg}"
                 if login_result.get("status") == "circuit_open":
+                    self.last_failure_stage = login_result.get("failure_stage") or self.last_failure_stage
                     warning("Portal circuit breaker sedang aktif. Menunda percobaan login.", scope=self.scope)
                     self._accumulated_logs = stop_log_collection()
                     return "CIRCUIT_OPEN"
@@ -361,7 +396,10 @@ class AttendanceEngine:
                         return True
                     self.last_failure_stage = "dashboard_unreachable"
 
-            failure_msg = login_result.get("message") if login_result else "Unknown login failure"
+            if login_result:
+                self.last_failure_stage = login_result.get("failure_stage") or self.last_failure_stage
+
+            failure_msg = self._resolve_login_failure_message(login_result)
             if login_result and login_result.get("status") == "success":
                 failure_msg = "Dashboard tidak bisa diverifikasi setelah login."
             error(f"Gagal login untuk {self.nip}: {failure_msg}", scope=self.scope)

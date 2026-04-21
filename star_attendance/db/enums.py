@@ -25,6 +25,7 @@ class AuditAction(str, Enum):
     update_profile = "update_profile"
     scheduler_sync = "scheduler_sync"
     settings_update = "settings_update"
+    rename_nip = "rename_nip"
     delete_personnel = "delete_personnel"
     search = "search"
     broadcast = "broadcast"

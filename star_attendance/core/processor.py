@@ -21,6 +21,14 @@ from star_attendance.notifier import notifier
 from star_attendance.queueing import create_queue_pool, encode_queue_payload, require_queue_schema
 from star_attendance.runtime import get_store
 
+LOGIN_FAILURE_STAGE_MESSAGES = {
+    "dashboard_unreachable": "Dashboard tidak bisa diverifikasi setelah login.",
+    "invalid_credentials": "NIP atau password portal tidak valid.",
+    "captcha_failed": "Captcha portal tidak valid.",
+    "login_form_unavailable": "Form login portal tidak tersedia.",
+    "waf_timeout": "WAF timeout sebelum form login tersedia.",
+}
+
 
 def _safe_last_success_record(store: Any, nip: str, action: str) -> tuple[Any | None, str | None]:
     record = store.get_last_success_action(nip, action)
@@ -30,6 +38,26 @@ def _safe_last_success_record(store: Any, nip: str, action: str) -> tuple[Any | 
         if len(record) == 1:
             return record[0], None
     return None, None
+
+
+def _resolve_login_error(login_result: Any) -> str:
+    if isinstance(login_result, Mapping):
+        if login_result.get("status") == "success":
+            return "Dashboard tidak bisa diverifikasi setelah login."
+
+        message = login_result.get("message")
+        if message not in (None, ""):
+            return str(message)
+
+        failure_stage = str(login_result.get("failure_stage") or "").strip()
+        if failure_stage:
+            return LOGIN_FAILURE_STAGE_MESSAGES.get(failure_stage, f"Login gagal ({failure_stage})")
+
+        status = str(login_result.get("status") or "").strip()
+        if status:
+            return "Login gagal." if status in {"failed", "error"} else f"Login gagal ({status})"
+
+    return str(login_result) if login_result else "Login gagal atau password tidak ditemukan"
 
 
 async def process_single_user(
@@ -161,10 +189,7 @@ async def process_single_user(
                     else:
                         last_error = str(last_error) if last_error else "Attendance submission failed"
                 else:
-                    if isinstance(login_res, dict):
-                        last_error = login_res.get("message") or login_res.get("status") or str(login_res)
-                    else:
-                        last_error = str(login_res) if login_res else "Login gagal atau password tidak ditemukan"
+                    last_error = _resolve_login_error(login_res)
 
                     store.add_audit_log(nip, action, "failed", last_error)
                     result = False

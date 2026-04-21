@@ -50,7 +50,7 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
             "👤 <b>DATA PERSONEL</b>\n"
             f"  ├ NAMA: <code>{user['nama']}</code>\n"
             f"  ├ NIP: <code>{user['nip']}</code>\n"
-            f"  ├ ID TELEGRAM: <code>{telegram_id}</code>\n"
+            f"  ├ TELEGRAM ID: <code>{telegram_id}</code>\n"
             f"  └ UNIT: <code>{user.get('nama_upt', 'CLUSTER DEFAULT')}</code>\n\n"
             "⏰ <b>JADWAL OPERASIONAL</b>\n"
             f"  ├ AUTO-MASUK: <code>{user['cron_in']}</code>{in_label}\n"

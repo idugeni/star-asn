@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from star_attendance.db.enums import AuditAction, AuditStatus
 from star_attendance.db.manager import db_manager
 
 REQUIRED_TABLES = (
@@ -19,6 +20,8 @@ REQUIRED_TABLES = (
     "pgqueuer",
     "personal_allowances",
 )
+REQUIRED_AUDIT_ACTIONS = frozenset(action.value for action in AuditAction)
+REQUIRED_AUDIT_STATUSES = frozenset(status.value for status in AuditStatus)
 
 
 def migrations_dir() -> Path:
@@ -132,7 +135,29 @@ def verify_runtime_schema(require_pgqueuer: bool = True) -> None:
             )
         ).scalar_one_or_none()
 
-    if missing:
-        raise RuntimeError(f"Database schema is not ready. Missing tables: {', '.join(missing)}")
-    if telegram_type != "bigint":
-        raise RuntimeError("Database schema is not ready. users.telegram_id must be BIGINT.")
+        if missing:
+            raise RuntimeError(f"Database schema is not ready. Missing tables: {', '.join(missing)}")
+        if telegram_type != "bigint":
+            raise RuntimeError("Database schema is not ready. users.telegram_id must be BIGINT.")
+
+        required_enum_labels = {
+            "audit_action": REQUIRED_AUDIT_ACTIONS,
+            "audit_status": REQUIRED_AUDIT_STATUSES,
+        }
+        for enum_name, expected_labels in required_enum_labels.items():
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT e.enumlabel
+                    FROM pg_type t
+                    JOIN pg_enum e ON t.oid = e.enumtypid
+                    WHERE t.typname = :enum_name
+                    """
+                ),
+                {"enum_name": enum_name},
+            ).fetchall()
+            actual_labels = {str(row[0]) for row in rows}
+            missing_labels = sorted(expected_labels - actual_labels)
+            if missing_labels:
+                joined = ", ".join(missing_labels)
+                raise RuntimeError(f"Database schema is not ready. {enum_name} is missing enum values: {joined}")
