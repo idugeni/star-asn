@@ -144,9 +144,27 @@ class TelegramNotifier:
         """Sends message immediately without queueing (blocking)."""
         return bool(self._send_now(message, self._resolve_targets(to_admin, to_group)))
 
-    def send_direct_message(self, chat_id: int | str | None, message: str) -> bool:
+    def send_direct_message(self, chat_id: int | str | None, message: str, delete_after: int | None = None) -> bool:
         if chat_id in (None, ""):
             return False
+        
+        # If delete_after is provided, we send it sync to get the ID, then schedule deletion
+        if delete_after and self.is_active:
+            res = self._send_now(message, [str(chat_id)])
+            if res and int(chat_id) in res:
+                msg_id = res[int(chat_id)]
+                # Schedule deletion via a simple thread to not block the main logic
+                def _del_task():
+                    import time
+                    time.sleep(delete_after)
+                    url = f"https://api.telegram.org/bot{self.token}/deleteMessage"
+                    try:
+                        self.session.post(url, json={"chat_id": str(chat_id), "message_id": msg_id}, timeout=5)
+                    except:
+                        pass
+                threading.Thread(target=_del_task, daemon=True).start()
+            return bool(res)
+            
         return self._enqueue_message(message, [str(chat_id)])
 
     def format_attendance_msg(
@@ -341,6 +359,7 @@ class TelegramNotifier:
         user_chat_id: int | str | None = None,
         user_message_id: int | None = None,
         debug_data: dict[Any, Any] | None = None,
+        delete_after_user_msg: int | None = 60,
     ) -> None:
         payload = dict(debug_data or {})
         payload.update(
@@ -392,7 +411,7 @@ class TelegramNotifier:
                 # If editing an existing message (Interactive), use the informative user message
                 self.edit_message(user_chat_id, user_message_id, user_message)
             else:
-                self.send_direct_message(user_chat_id, user_message)
+                self.send_direct_message(user_chat_id, user_message, delete_after=delete_after_user_msg)
 
         # Admin direct notification only if it doesn't overlap with the user or group
         if to_admin and not (to_user and str(user_chat_id) == str(self.admin_id)):

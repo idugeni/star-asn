@@ -25,6 +25,7 @@ export const AdminDashboard = ({ _user, activeTab, users, stats, logs }: AdminDa
     const [visibleNodes, setVisibleNodes] = useState(10);
     const [visibleLogs, setVisibleLogs] = useState(10);
     const [maintMode, setMaintMode] = useState(false);
+    const [selectedUserNip, setSelectedUserNip] = useState<string | null>(null);
 
     const filteredUsers = useMemo(() => {
         return users.filter(u => {
@@ -36,6 +37,10 @@ export const AdminDashboard = ({ _user, activeTab, users, stats, logs }: AdminDa
 
     const displayedUsers = filteredUsers.slice(0, visibleNodes);
     const displayedLogs = logs.slice(0, visibleLogs);
+    const selectedUser = useMemo(
+        () => filteredUsers.find((person) => person.nip === selectedUserNip) ?? displayedUsers[0] ?? null,
+        [displayedUsers, filteredUsers, selectedUserNip]
+    );
 
     const triggerSync = async () => {
         const id = toast.loading('Initiating Mass Node Sync...');
@@ -102,17 +107,65 @@ export const AdminDashboard = ({ _user, activeTab, users, stats, logs }: AdminDa
                     </div>
                 </div>
 
+                {selectedUser && (
+                    <Card className="bg-primary/5 border-primary/20 overflow-hidden">
+                        <CardContent className="p-4 space-y-4">
+                            <div className="flex justify-between items-start gap-3">
+                                <div className="space-y-1">
+                                    <p className="text-[7px] font-black uppercase tracking-[0.3em] text-primary/70">Selected Personnel</p>
+                                    <h3 className="text-base font-black text-white uppercase leading-tight">{selectedUser.nama}</h3>
+                                    <p className="text-[9px] font-mono font-bold text-primary tracking-tight">NIP {selectedUser.nip}</p>
+                                </div>
+                                <Badge className={cn("text-[6px] font-black border-none px-2 py-0.5", selectedUser.role === 'admin' ? "bg-primary text-white" : "bg-emerald-500 text-white")}>
+                                    {selectedUser.role.toUpperCase()}
+                                </Badge>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 border-t border-white/5 pt-3">
+                                <div className="space-y-1">
+                                    <p className="text-[7px] font-black uppercase opacity-40">Work Node</p>
+                                    <p className="text-[10px] font-bold text-white uppercase leading-tight">{selectedUser.upts?.nama_upt || 'Regional Standalone Node'}</p>
+                                </div>
+                                <div className="space-y-1 text-right">
+                                    <p className="text-[7px] font-black uppercase opacity-40">Schedule</p>
+                                    <p className="text-[10px] font-mono font-black text-amber-500">{selectedUser.cron_in} - {selectedUser.cron_out}</p>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+
                 <div className="grid gap-4">
                     {displayedUsers.map((person, i) => (
-                        <motion.div key={person.nip} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
-                            <Card className="bg-card/40 border-border/50 overflow-hidden group hover:bg-accent/5 transition-all">
+                        <motion.button
+                            key={person.nip}
+                            type="button"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.03 }}
+                            onClick={() => setSelectedUserNip(person.nip)}
+                            aria-pressed={selectedUser?.nip === person.nip}
+                            className="block w-full text-left"
+                        >
+                            <Card className={cn(
+                                "bg-card/40 border-border/50 overflow-hidden group transition-all cursor-pointer",
+                                selectedUser?.nip === person.nip
+                                    ? "border-primary/60 bg-primary/5 shadow-lg shadow-primary/10"
+                                    : "hover:bg-accent/5"
+                            )}>
                                 <CardContent className="p-4 space-y-4">
                                     <div className="flex flex-col gap-1">
                                         <div className="flex justify-between items-center">
                                             <Badge className={cn("text-[6px] font-black border-none px-2 py-0.5", person.role === 'admin' ? "bg-primary text-white" : "bg-emerald-500 text-white")}>
                                                 {person.role.toUpperCase()}
                                             </Badge>
-                                            <p className="text-[7px] font-mono text-muted-foreground/50 uppercase tracking-tighter">NODE_{person.nip.slice(-4)}</p>
+                                            <div className="flex items-center gap-2">
+                                                {selectedUser?.nip === person.nip && (
+                                                    <Badge variant="outline" className="h-5 border-primary/30 bg-primary/10 px-2 text-[6px] font-black uppercase tracking-widest text-primary">
+                                                        Selected
+                                                    </Badge>
+                                                )}
+                                                <p className="text-[7px] font-mono text-muted-foreground/50 uppercase tracking-tighter">NODE_{person.nip.slice(-4)}</p>
+                                            </div>
                                         </div>
                                         <h3 className="text-sm font-black text-white uppercase tracking-tight leading-tight">{person.nama}</h3>
                                         <p className="text-[9px] font-mono font-bold text-primary mt-0.5 tracking-tight">NIP {person.nip}</p>
@@ -140,7 +193,7 @@ export const AdminDashboard = ({ _user, activeTab, users, stats, logs }: AdminDa
                                     </div>
                                 </CardContent>
                             </Card>
-                        </motion.div>
+                        </motion.button>
                     ))}
                     {filteredUsers.length > visibleNodes && (
                         <Button variant="ghost" onClick={() => setVisibleNodes(v => v + 10)} className="w-full text-[8px] font-black uppercase tracking-widest text-muted-foreground py-6">

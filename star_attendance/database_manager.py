@@ -2,7 +2,7 @@ import json
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import func, text
@@ -21,7 +21,7 @@ from star_attendance.core.timeutils import (
 )
 from star_attendance.db.enums import AuditAction, AuditStatus
 from star_attendance.db.manager import db_manager
-from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserSession, PersonalAllowance
+from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserPerformanceAllowance, UserSession, PersonalAllowance
 from star_attendance.db.types import AuditLogData, UserData
 
 DEFAULT_LOCATION_LATITUDE = -6.2210973
@@ -109,6 +109,36 @@ def _coerce_optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_optional_date(value: Any) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.fromisoformat(str(value)).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _infer_allowance_year(period_code: str, data: list[dict[str, Any]]) -> int:
+    if data:
+        date_str = str(data[0].get("date") or "").strip()
+        try:
+            allowance_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            if "_" in period_code:
+                start_code, end_code = period_code.split("_", maxsplit=1)
+                start_month = int(start_code[2:])
+                end_month = int(end_code[2:])
+                if start_month > end_month and allowance_date.month == end_month:
+                    return allowance_date.year - 1
+            return allowance_date.year
+        except (TypeError, ValueError):
+            pass
+    return local_date().year
 
 
 def _stringify_setting(value: Any) -> str:
@@ -563,6 +593,9 @@ class SupabaseManager:
                 {"nip": new_nip}, synchronize_session=False
             )
             session.query(PersonalAllowance).filter(PersonalAllowance.nip == old_nip).update(
+                {"nip": new_nip}, synchronize_session=False
+            )
+            session.query(UserPerformanceAllowance).filter(UserPerformanceAllowance.nip == old_nip).update(
                 {"nip": new_nip}, synchronize_session=False
             )
             session.execute(
@@ -1154,7 +1187,7 @@ class SupabaseManager:
             session.merge(GlobalSetting(key=key, value=_stringify_setting(value)))
         self._invalidate_settings_cache()
 
-    def update_global_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed_keys = {
             "default_location",
             "default_latitude",
@@ -1210,19 +1243,19 @@ class SupabaseManager:
         with db_manager.get_session() as session:
             session.execute(
                 text(
-                    "INSERT INTO global_settings (key, value) VALUES ('mass_pos', '1') "
-                    "ON CONFLICT (key) DO UPDATE SET value = (global_settings.value::int + 1)::text"
+                    "INSERT INTO settings (key, value) VALUES ('mass_pos', '1') "
+                    "ON CONFLICT (key) DO UPDATE SET value = (settings.value::int + 1)::text"
                 )
             )
             session.commit()
-            res = session.execute(text("SELECT value FROM global_settings WHERE key = 'mass_pos'")).scalar()
+            res = session.execute(text("SELECT value FROM settings WHERE key = 'mass_pos'")).scalar()
             return int(res or 0)
 
     def add_mass_log(self, nip: str, name: str, status: str) -> None:
         """Adds a log entry to the rolling mass attendance log (max 5 entries)."""
         import json
         with db_manager.get_session() as session:
-            current = session.execute(text("SELECT value FROM global_settings WHERE key = 'mass_log'")).scalar()
+            current = session.execute(text("SELECT value FROM settings WHERE key = 'mass_log'")).scalar()
             logs = json.loads(str(current)) if current else []
             
             status_emoji = "✅" if status == "success" else "❌" if status == "failed" else "⚠️"
@@ -1232,7 +1265,7 @@ class SupabaseManager:
             logs = logs[:5]  # Keep only last 5
             
             session.execute(
-                text("INSERT INTO global_settings (key, value) VALUES ('mass_log', :val) ON CONFLICT (key) DO UPDATE SET value = :val"),
+                text("INSERT INTO settings (key, value) VALUES ('mass_log', :val) ON CONFLICT (key) DO UPDATE SET value = :val"),
                 {"val": json.dumps(logs)}
             )
             session.commit()
@@ -1248,14 +1281,27 @@ class SupabaseManager:
 
     # --- PERSONAL ALLOWANCE OPERATIONS ---
 
-    def save_personal_allowance(self, nip: str, period_code: str, data: list[dict[str, Any]]) -> None:
+    def save_user_performance_allowance(
+        self,
+        nip: str,
+        period_code: str,
+        year: int,
+        data: list[dict[str, Any]],
+        *,
+        period_label: str | None = None,
+        period_start: Any = None,
+        period_end: Any = None,
+    ) -> None:
         with db_manager.get_session() as session:
             user = session.query(User).filter(User.nip == nip).first()
             user_id = user.id if user else None
+            resolved_period_start = _coerce_optional_date(period_start)
+            resolved_period_end = _coerce_optional_date(period_end)
 
-            # Delete existing records for this period to avoid duplicates
-            session.query(PersonalAllowance).filter(
-                PersonalAllowance.nip == nip, PersonalAllowance.period_code == period_code
+            session.query(UserPerformanceAllowance).filter(
+                UserPerformanceAllowance.nip == nip,
+                UserPerformanceAllowance.allowance_year == year,
+                UserPerformanceAllowance.period_code == period_code,
             ).delete()
 
             for item in data:
@@ -1263,29 +1309,193 @@ class SupabaseManager:
                 if not date_str:
                     continue
                 try:
-                    dt = datetime.strptime(date_str, "%Y-%m-%d")
+                    dt = datetime.strptime(str(date_str), "%Y-%m-%d").date()
                 except ValueError:
                     continue
 
-                allowance = PersonalAllowance(
+                allowance = UserPerformanceAllowance(
                     user_id=user_id,
                     nip=nip,
-                    date=dt,
+                    allowance_year=year,
+                    period_code=period_code,
+                    period_label=period_label,
+                    period_start=resolved_period_start,
+                    period_end=resolved_period_end,
+                    allowance_date=dt,
                     clock_in=item.get("clock_in"),
                     clock_out=item.get("clock_out"),
                     daily_allowance_amount=item.get("daily_allowance_amount"),
                     deduction_amount=item.get("deduction_amount"),
                     total=item.get("total"),
                     deduction_reason=item.get("deduction_reason"),
-                    period_code=period_code,
+                    raw_payload=dict(item),
+                    synced_at=now_storage(),
                     updated_at=now_storage(),
                 )
                 session.add(allowance)
             session.commit()
 
-    def get_personal_allowance(self, nip: str, period_code: str) -> list[dict[str, Any]]:
+    def get_user_performance_allowance(self, nip: str, period_code: str, year: int) -> list[dict[str, Any]]:
         with db_manager.get_session() as session:
             rows = (
+                session.query(UserPerformanceAllowance)
+                .filter(
+                    UserPerformanceAllowance.nip == nip,
+                    UserPerformanceAllowance.period_code == period_code,
+                    UserPerformanceAllowance.allowance_year == year,
+                )
+                .order_by(UserPerformanceAllowance.allowance_date.asc())
+                .all()
+            )
+            if not rows:
+                legacy_rows = (
+                    session.query(PersonalAllowance)
+                    .filter(PersonalAllowance.nip == nip, PersonalAllowance.period_code == period_code)
+                    .order_by(PersonalAllowance.date.asc())
+                    .all()
+                )
+                return [
+                    {
+                        "date": row.date.strftime("%Y-%m-%d"),
+                        "clock_in": row.clock_in,
+                        "clock_out": row.clock_out,
+                        "daily_allowance_amount": row.daily_allowance_amount,
+                        "deduction_amount": row.deduction_amount,
+                        "total": row.total,
+                        "deduction_reason": row.deduction_reason,
+                    }
+                    for row in legacy_rows
+                ]
+            return [
+                {
+                    "date": row.allowance_date.strftime("%Y-%m-%d"),
+                    "clock_in": row.clock_in,
+                    "clock_out": row.clock_out,
+                    "daily_allowance_amount": row.daily_allowance_amount,
+                    "deduction_amount": row.deduction_amount,
+                    "total": row.total,
+                    "deduction_reason": row.deduction_reason,
+                }
+                for row in rows
+            ]
+
+    def get_user_performance_allowance_periods(self, nip: str, year: int) -> list[dict[str, Any]]:
+        with db_manager.get_session() as session:
+            rows = (
+                session.query(UserPerformanceAllowance)
+                .filter(
+                    UserPerformanceAllowance.nip == nip,
+                    UserPerformanceAllowance.allowance_year == year,
+                )
+                .order_by(
+                    UserPerformanceAllowance.allowance_year.desc(),
+                    UserPerformanceAllowance.allowance_date.desc(),
+                )
+                .all()
+            )
+            seen: set[tuple[int, str]] = set()
+            periods: list[dict[str, Any]] = []
+            for row in rows:
+                key = (int(row.allowance_year), str(row.period_code))
+                if key in seen:
+                    continue
+                seen.add(key)
+                periods.append(
+                    {
+                        "year": int(row.allowance_year),
+                        "period_code": str(row.period_code),
+                        "period_label": row.period_label or row.period_code,
+                        "period_start": row.period_start.isoformat() if row.period_start else None,
+                        "period_end": row.period_end.isoformat() if row.period_end else None,
+                        "synced_at": isoformat_local(row.synced_at) if row.synced_at else None,
+                    }
+                )
+            if periods:
+                return periods
+
+            legacy_rows = (
+                session.query(PersonalAllowance)
+                .filter(PersonalAllowance.nip == nip)
+                .order_by(PersonalAllowance.date.desc())
+                .all()
+            )
+            legacy_periods: list[dict[str, Any]] = []
+            legacy_seen: set[str] = set()
+            for row in legacy_rows:
+                if not row.period_code or row.period_code in legacy_seen:
+                    continue
+                legacy_year = row.date.year
+                if legacy_year != year:
+                    continue
+                legacy_seen.add(row.period_code)
+                legacy_periods.append(
+                    {
+                        "year": legacy_year,
+                        "period_code": row.period_code,
+                        "period_label": row.period_code,
+                        "period_start": None,
+                        "period_end": None,
+                        "synced_at": isoformat_local(row.updated_at) if row.updated_at else None,
+                    }
+                )
+            return legacy_periods
+
+    def save_personal_allowance(
+        self,
+        nip: str,
+        period_code: str,
+        data: list[dict[str, Any]],
+        *,
+        year: int | None = None,
+        period_label: str | None = None,
+        period_start: Any = None,
+        period_end: Any = None,
+    ) -> None:
+        resolved_year = year if year is not None else _infer_allowance_year(period_code, data)
+        self.save_user_performance_allowance(
+            nip,
+            period_code,
+            resolved_year,
+            data,
+            period_label=period_label,
+            period_start=period_start,
+            period_end=period_end,
+        )
+
+    def get_personal_allowance(self, nip: str, period_code: str, year: int | None = None) -> list[dict[str, Any]]:
+        if year is not None:
+            return self.get_user_performance_allowance(nip, period_code, year)
+
+        with db_manager.get_session() as session:
+            rows = (
+                session.query(UserPerformanceAllowance)
+                .filter(
+                    UserPerformanceAllowance.nip == nip,
+                    UserPerformanceAllowance.period_code == period_code,
+                )
+                .order_by(
+                    UserPerformanceAllowance.allowance_year.desc(),
+                    UserPerformanceAllowance.allowance_date.asc(),
+                )
+                .all()
+            )
+            if rows:
+                latest_year = int(rows[0].allowance_year)
+                return [
+                    {
+                        "date": row.allowance_date.strftime("%Y-%m-%d"),
+                        "clock_in": row.clock_in,
+                        "clock_out": row.clock_out,
+                        "daily_allowance_amount": row.daily_allowance_amount,
+                        "deduction_amount": row.deduction_amount,
+                        "total": row.total,
+                        "deduction_reason": row.deduction_reason,
+                    }
+                    for row in rows
+                    if int(row.allowance_year) == latest_year
+                ]
+
+            legacy_rows = (
                 session.query(PersonalAllowance)
                 .filter(PersonalAllowance.nip == nip, PersonalAllowance.period_code == period_code)
                 .order_by(PersonalAllowance.date.asc())
@@ -1301,7 +1511,7 @@ class SupabaseManager:
                     "total": row.total,
                     "deduction_reason": row.deduction_reason,
                 }
-                for row in rows
+                for row in legacy_rows
             ]
 
     def search_users(self, query: str) -> list[UserData]:

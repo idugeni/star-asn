@@ -14,11 +14,12 @@ from star_attendance.bot.telemetry import monitor_mass_progress
 from star_attendance.bot.ui import get_back_button, get_settings_menu
 from star_attendance.core.config import settings
 from star_attendance.core.processor import mass_attendance, process_single_user
-from star_attendance.core.timeutils import format_formal_date, format_formal_timestamp
+from star_attendance.core.timeutils import format_formal_date, format_formal_timestamp, now_local
 
 from .handler_views import (
     build_dashboard_message,
     build_global_settings_message,
+    build_manage_user_message,
     build_scheduler_message,
     build_user_manage_keyboard,
     get_global_settings_keyboard,
@@ -97,11 +98,15 @@ async def _show_profile(message: Message, *, services: CallbackServices, tid: in
     if not user:
         return
 
-    coords = (
-        f"{user['latitude']:.6f}, {user['longitude']:.6f}"
-        if user.get("latitude") is not None and user.get("longitude") is not None
-        else "NOT SET"
-    )
+    try:
+        lat = user.get("latitude")
+        lon = user.get("longitude")
+        if lat and lon:
+            coords = f"{float(lat):.6f}, {float(lon):.6f}"
+        else:
+            coords = "BELUM DISET"
+    except (ValueError, TypeError):
+        coords = "FORMAT TIDAK VALID"
     auto_status = "ACTIVE" if user.get("auto_attendance_active") else "INACTIVE"
     in_source = str(user.get("cron_in_source", "-")).upper()
     out_source = str(user.get("cron_out_source", "-")).upper()
@@ -379,114 +384,218 @@ async def handle_callback(
     data = query.data or ""
     message = query.message
 
-    if data == "noop":
-        return
-    if data == "main_menu":
-        user = services.store.get_user_by_telegram_id(tid)
-        await services.edit_message(
-            message, build_dashboard_message(user, store=services.store), await services.get_main_menu(tid)
-        )
-        return
-    if data == "start_settings_menu":
-        await services.edit_message(
-            message,
-            "<b>⚙️ PENGATURAN</b>\n────────────────\nSilakan pilih konfigurasi yang ingin Anda ubah:",
-            get_settings_menu(),
-        )
-        return
-    if data == "view_history":
-        await _show_history(message, services=services, tid=tid)
-        return
-    if data == "view_help":
-        response = (
-            f"<b>📖 PANDUAN PENGGUNA (V{settings.BOT_VERSION})</b>\n"
-            "────────────────\n"
-            "<b>DASHBOARD:</b> Pantau status & profil Anda secara real-time.\n"
-            "<b>RIWAYAT:</b> Cek log keberhasilan absen otomatis.\n"
-            "<b>PENGATURAN:</b> Sesuaikan jam, hari kerja, dan lokasi GPS kustom.\n\n"
-            "<i>Sistem ini bekerja otomatis sesuai jadwal. Pastikan kredensial Anda tetap valid.</i>"
-        )
-        await services.edit_message(message, response, InlineKeyboardMarkup([[get_back_button()]]))
-        return
-    if data == "view_support":
-        await _show_support(message)
-        return
-    if data == "view_global_logs":
-        await _show_global_logs(message, services=services, tid=tid)
-        return
-    if data == "view_profile":
-        await _show_profile(message, services=services, tid=tid)
-        return
-    if data == "view_global_settings":
-        if not services.is_admin(tid):
+    try:
+        if data == "noop":
             return
-        await services.edit_message(
-            message, build_global_settings_message(store=services.store), get_global_settings_keyboard()
-        )
-        return
-    if data == "view_scheduler":
-        if not services.is_admin(tid):
+        if data == "main_menu":
+            user = services.store.get_user_by_telegram_id(tid)
+            await services.edit_message(
+                message, build_dashboard_message(user, store=services.store), await services.get_main_menu(tid)
+            )
             return
-        await _show_scheduler(message, services=services)
-        return
-    if data == "restart_scheduler":
-        if not services.is_admin(tid):
+        if data == "start_settings_menu":
+            await services.edit_message(
+                message,
+                "<b>⚙️ PENGATURAN</b>\n────────────────\nSilakan pilih konfigurasi yang ingin Anda ubah:",
+                get_settings_menu(),
+            )
             return
-        await _show_scheduler(message, services=services, restart=True)
-        return
-    if data == "view_dead_letters":
-        await _show_dead_letters(message, services=services, tid=tid)
-        return
-    if data == "view_system":
-        await _show_system(message, services=services, tid=tid)
-        return
-    if data == "view_stats":
-        await _show_stats(message, services=services, tid=tid)
-        return
-    if data.startswith("view_users_list_"):
-        await _show_users_page(message, services=services, tid=tid, page=int(data.split("_")[-1]))
-        return
-    if data.startswith("manage_user_"):
-        await _show_manage_user(message, services=services, tid=tid, target_nip=data.replace("manage_user_", ""))
-        return
-    if data.startswith("force_in_"):
-        await _trigger_single_action(
-            message, services=services, tid=tid, target_nip=data.replace("force_in_", ""), action="in"
-        )
-        return
-    if data.startswith("force_out_"):
-        await _trigger_single_action(
-            message, services=services, tid=tid, target_nip=data.replace("force_out_", ""), action="out"
-        )
-        return
-    if data in {"trigger_in", "trigger_out"}:
-        await _trigger_mass_action(message, context, services=services, tid=tid, action=cast(str, data).split("_")[1])
-        return
-    if data == "trigger_stop":
-        await _trigger_stop(message, services=services, tid=tid)
-        return
-    if data == "view_allowance_menu":
-        await _show_allowance(message, services=services, tid=tid)
-        return
-    if data == "sync_allowance":
-        await _sync_allowance(message, services=services, tid=tid)
-        return
+        if data == "view_history":
+            await _show_history(message, services=services, tid=tid)
+            return
+        if data == "view_help":
+            response = (
+                f"<b>📖 PANDUAN PENGGUNA (V{settings.BOT_VERSION})</b>\n"
+                "────────────────\n"
+                "<b>DASHBOARD:</b> Pantau status & profil Anda secara real-time.\n"
+                "<b>RIWAYAT:</b> Cek log keberhasilan absen otomatis.\n"
+                "<b>PENGATURAN:</b> Sesuaikan jam, hari kerja, dan lokasi GPS kustom.\n\n"
+                "<i>Sistem ini bekerja otomatis sesuai jadwal. Pastikan kredensial Anda tetap valid.</i>"
+            )
+            await services.edit_message(message, response, InlineKeyboardMarkup([[get_back_button()]]))
+            return
+        if data == "view_support":
+            await _show_support(message)
+            return
+        if data == "view_global_logs":
+            await _show_global_logs(message, services=services, tid=tid)
+            return
+        if data == "view_profile":
+            await _show_profile(message, services=services, tid=tid)
+            return
+        if data == "view_global_settings":
+            if not services.is_admin(tid):
+                return
+            await services.edit_message(
+                message, build_global_settings_message(store=services.store), get_global_settings_keyboard()
+            )
+            return
+        if data == "view_scheduler":
+            if not services.is_admin(tid):
+                return
+            await _show_scheduler(message, services=services)
+            return
+        if data == "restart_scheduler":
+            if not services.is_admin(tid):
+                return
+            await _show_scheduler(message, services=services, restart=True)
+            return
+        if data == "view_dead_letters":
+            await _show_dead_letters(message, services=services, tid=tid)
+            return
+        if data == "view_system":
+            await _show_system(message, services=services, tid=tid)
+            return
+        if data == "view_stats":
+            await _show_stats(message, services=services, tid=tid)
+            return
+        if data.startswith("view_users_list_"):
+            await _show_users_page(message, services=services, tid=tid, page=int(data.split("_")[-1]))
+            return
+        if data.startswith("manage_user_"):
+            await _show_manage_user(message, services=services, tid=tid, target_nip=data.replace("manage_user_", ""))
+            return
+        if data.startswith("force_in_"):
+            await _trigger_single_action(
+                message, services=services, tid=tid, target_nip=data.replace("force_in_", ""), action="in"
+            )
+            return
+        if data.startswith("force_out_"):
+            await _trigger_single_action(
+                message, services=services, tid=tid, target_nip=data.replace("force_out_", ""), action="out"
+            )
+            return
+        if data in {"trigger_in", "trigger_out"}:
+            await _trigger_mass_action(message, context, services=services, tid=tid, action=cast(str, data).split("_")[1])
+            return
+        if data == "trigger_stop":
+            await _trigger_stop(message, services=services, tid=tid)
+            return
+        if data == "view_allowance_menu":
+            await _show_allowance(message, services=services, tid=tid)
+            return
+        if data.startswith("allowance_periods|"):
+            try:
+                _, year_text = data.split("|", maxsplit=1)
+                await _show_allowance_period_selector(message, services=services, tid=tid, year=int(year_text))
+            except ValueError:
+                await _show_allowance_period_selector(message, services=services, tid=tid)
+            return
+        if data.startswith("allowance_period|"):
+            try:
+                _, period_code, year_text = data.split("|", maxsplit=2)
+                await _show_allowance(message, services=services, tid=tid, period_code=period_code, year=int(year_text))
+            except ValueError:
+                await _show_allowance(message, services=services, tid=tid)
+            return
+        if data == "sync_allowance":
+            await _sync_allowance(message, services=services, tid=tid)
+            return
+        if data.startswith("sync_allowance|"):
+            try:
+                _, period_code, year_text = data.split("|", maxsplit=2)
+                await _sync_allowance(message, services=services, tid=tid, period_code=period_code, year=int(year_text))
+            except ValueError:
+                await _sync_allowance(message, services=services, tid=tid)
+            return
+    except Exception as exc:
+        from star_attendance.core.utils import log as core_log
+        core_log("ERROR", f"callback_error data={data} user={tid} error={exc}", scope="BOT")
+        try:
+            await query.edit_message_text(
+                f"❌ <b>KESALAHAN SISTEM</b>\nTerjadi kesalahan saat memproses permintaan Anda.\n<code>{exc}</code>",
+                parse_mode=constants.ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[get_back_button()]]),
+            )
+        except Exception:
+            pass
 
 
-async def _show_allowance(message: Message, *, services: CallbackServices, tid: int) -> None:
+def _get_allowance_rows(store: Any, nip: str, period_code: str, year: int) -> list[dict[str, Any]]:
+    get_user_allowance = getattr(store, "get_user_performance_allowance", None)
+    if callable(get_user_allowance):
+        return cast(list[dict[str, Any]], get_user_allowance(nip, period_code, year))
+
+    get_personal_allowance = getattr(store, "get_personal_allowance", None)
+    if callable(get_personal_allowance):
+        try:
+            return cast(list[dict[str, Any]], get_personal_allowance(nip, period_code, year))
+        except TypeError:
+            return cast(list[dict[str, Any]], get_personal_allowance(nip, period_code))
+    return []
+
+
+def _get_allowance_periods(store: Any, nip: str, year: int) -> list[dict[str, Any]]:
+    get_periods = getattr(store, "get_user_performance_allowance_periods", None)
+    if callable(get_periods):
+        return cast(list[dict[str, Any]], get_periods(nip, year))
+    return []
+
+
+async def _show_allowance(
+    message: Message,
+    *,
+    services: CallbackServices,
+    tid: int,
+    period_code: str | None = None,
+    year: int | None = None,
+) -> None:
     user = services.store.get_user_by_telegram_id(tid)
     if not user:
         return
 
     from star_attendance.allowance_handler import AllowanceHandler
 
-    period_code, _ = AllowanceHandler.get_current_period_code()
-    readable_period = AllowanceHandler.format_period_code(period_code)
-    allowances = services.store.get_personal_allowance(user["nip"], period_code)
+    target_year = year or now_local().year
+    cached_periods = _get_allowance_periods(services.store, user["nip"], target_year)
 
-    response = f"<b>💰 TUNJANGAN KINERJA</b>\n📅 Periode: <code>{readable_period}</code>\n────────────────\n"
+    selected_period = period_code
+    if not selected_period and cached_periods:
+        selected_period = str(cached_periods[0].get("period_code") or "")
+
+    if not selected_period:
+        current_period, current_year = AllowanceHandler.get_current_period_code()
+        previous_period, previous_year = AllowanceHandler.get_previous_period_code()
+        fallback_candidates: list[str] = []
+        if current_year == target_year:
+            fallback_candidates.append(current_period)
+        if previous_year == target_year and previous_period not in fallback_candidates:
+            fallback_candidates.append(previous_period)
+        if not fallback_candidates:
+            fallback_candidates = [
+                option.period_code for option in AllowanceHandler.build_fallback_period_options(target_year)
+            ]
+        selected_period = fallback_candidates[0]
+
+    allowances = _get_allowance_rows(services.store, user["nip"], selected_period, target_year)
+    if not allowances and period_code is None:
+        current_period, current_year = AllowanceHandler.get_current_period_code()
+        previous_period, previous_year = AllowanceHandler.get_previous_period_code()
+        fallback_candidates = [
+            candidate
+            for candidate, candidate_year in [(current_period, current_year), (previous_period, previous_year)]
+            if candidate_year == target_year and candidate != selected_period
+        ]
+        for candidate in fallback_candidates:
+            candidate_rows = _get_allowance_rows(services.store, user["nip"], candidate, target_year)
+            if candidate_rows:
+                selected_period = candidate
+                allowances = candidate_rows
+                break
+
+    readable_period = AllowanceHandler.format_period_code(selected_period)
+
+    response = (
+        "<b>💰 TUNJANGAN KINERJA</b>\n"
+        f"📅 Periode: <code>{readable_period}</code>\n"
+        f"🗓 Tahun: <code>{target_year}</code>\n"
+        "────────────────\n"
+    )
     if not allowances:
-        response += "<i>Data belum tersedia di database lokal. Silakan sinkronkan data terbaru dari portal.</i>"
+        response += (
+            "<i>Data periode ini belum tersedia di database lokal. "
+            "Silakan sinkronkan langsung dari portal atau pilih periode lain.</i>"
+        )
     else:
         try:
 
@@ -519,29 +628,109 @@ async def _show_allowance(message: Message, *, services: CallbackServices, tid: 
                 response += f"   ⚠️ <i>{item['deduction_reason']} (-{item['deduction_amount']})</i>\n"
 
     keyboard = [
-        [InlineKeyboardButton("🔄 SINKRONKAN DATA", callback_data="sync_allowance")],
+        [InlineKeyboardButton("🔄 SINKRONKAN PERIODE INI", callback_data=f"sync_allowance|{selected_period}|{target_year}")],
+        [InlineKeyboardButton("🗓 PILIH PERIODE", callback_data=f"allowance_periods|{target_year}")],
         [get_back_button()],
     ]
     await services.edit_message(message, response, InlineKeyboardMarkup(keyboard))
 
 
-async def _sync_allowance(message: Message, *, services: CallbackServices, tid: int) -> None:
+async def _show_allowance_period_selector(
+    message: Message,
+    *,
+    services: CallbackServices,
+    tid: int,
+    year: int | None = None,
+) -> None:
     user = services.store.get_user_by_telegram_id(tid)
     if not user:
         return
 
+    from star_attendance.allowance_handler import AllowanceHandler, list_user_allowance_periods
+
+    target_year = year or now_local().year
+    periods: list[dict[str, Any]] = []
+    note = "<i>Daftar periode diambil langsung dari portal.</i>"
+
+    try:
+        portal_periods = await list_user_allowance_periods(user["nip"], year=target_year)
+        if portal_periods.get("status") == "success":
+            periods = cast(list[dict[str, Any]], portal_periods.get("periods") or [])
+        else:
+            note = "<i>Portal belum bisa diakses. Menampilkan periode dari cache lokal/template tahun berjalan.</i>"
+    except Exception:
+        note = "<i>Portal belum bisa diakses. Menampilkan periode dari cache lokal/template tahun berjalan.</i>"
+
+    if not periods:
+        periods = _get_allowance_periods(services.store, user["nip"], target_year)
+
+    if not periods:
+        periods = [
+            AllowanceHandler._serialize_period_option(option)
+            for option in AllowanceHandler.build_fallback_period_options(target_year)
+        ]
+
+    response = (
+        "<b>🗓 PILIH PERIODE TUNJANGAN</b>\n"
+        f"🗓 Tahun: <code>{target_year}</code>\n"
+        "────────────────\n"
+        f"{note}"
+    )
+
+    keyboard: list[list[InlineKeyboardButton]] = []
+    current_row: list[InlineKeyboardButton] = []
+    for period in periods:
+        code = str(period.get("period_code") or "")
+        label = str(
+            period.get("label")
+            or period.get("period_label")
+            or period.get("readable_period")
+            or AllowanceHandler.format_period_code(code)
+        )
+        current_row.append(InlineKeyboardButton(label, callback_data=f"allowance_period|{code}|{target_year}"))
+        if len(current_row) == 2:
+            keyboard.append(current_row)
+            current_row = []
+    if current_row:
+        keyboard.append(current_row)
+    keyboard.append([InlineKeyboardButton("◀️ KEMBALI KE DETAIL", callback_data="view_allowance_menu")])
+
+    await services.edit_message(message, response, InlineKeyboardMarkup(keyboard))
+
+
+async def _sync_allowance(
+    message: Message,
+    *,
+    services: CallbackServices,
+    tid: int,
+    period_code: str | None = None,
+    year: int | None = None,
+) -> None:
+    user = services.store.get_user_by_telegram_id(tid)
+    if not user:
+        return
+
+    target_year = year or now_local().year
+    target_period = period_code
+
     await message.edit_text(
         "⏳ <b>SEDANG MENGAMBIL DATA TUNJANGAN...</b>\n"
-        "<i>Mohon tunggu, sedang login ke portal budget & mengekstraksi data terbaru.</i>",
+        "<i>Mohon tunggu, sedang login ke portal budget & mengekstraksi data periode yang dipilih.</i>",
         parse_mode=constants.ParseMode.HTML,
     )
 
     from star_attendance.allowance_handler import sync_user_allowance
 
     try:
-        result = await sync_user_allowance(user["nip"])
+        result = await sync_user_allowance(user["nip"], period_code=target_period, year=target_year)
         if result.get("status") == "success":
-            await _show_allowance(message, services=services, tid=tid)
+            await _show_allowance(
+                message,
+                services=services,
+                tid=tid,
+                period_code=cast(str | None, result.get("period")) or target_period,
+                year=cast(int | None, result.get("year")) or target_year,
+            )
         else:
             msg = result.get("message", "Unknown Error")
             if msg == "session_expired":

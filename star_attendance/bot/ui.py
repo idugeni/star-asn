@@ -26,8 +26,21 @@ def is_authorized(update: Update) -> bool:
 def is_admin(telegram_id: int) -> bool:
     if ADMIN_ID is not None and telegram_id == ADMIN_ID:
         return True
-    user = store.get_user_by_telegram_id(telegram_id)
-    return bool(user.get("is_admin", False)) if user else False
+    try:
+        user = store.get_user_by_telegram_id(telegram_id)
+        if user and isinstance(user, dict):
+            return bool(user.get("is_admin", False))
+        # Handle cases where user might be a SQLAlchemy Row or other object
+        if user and hasattr(user, "is_admin"):
+            return bool(getattr(user, "is_admin", False))
+        if user and hasattr(user, "__getitem__"):
+            try:
+                return bool(user["is_admin"])
+            except (KeyError, IndexError, TypeError):
+                pass
+    except Exception:
+        pass
+    return False
 
 
 def get_progress_bar(current: int, total: int, length: int = 10) -> str:
@@ -97,7 +110,7 @@ async def get_main_menu(telegram_id: int) -> InlineKeyboardMarkup:
     else:
         user = store.get_user_by_telegram_id(telegram_id)
         if not user:
-            keyboard = [[InlineKeyboardButton("➕ DAFTAR PERSONEL BARU", callback_data="start_reg")]]
+            keyboard = [[InlineKeyboardButton("📝 REGISTRASI AKUN SAYA", callback_data="start_reg")]]
 
     return InlineKeyboardMarkup(keyboard)
 

@@ -81,6 +81,8 @@ htmlcov/
 star_attendance/__pycache__/
 star_attendance/*/__pycache__/
 .ipynb_checkpoints
+output/
+.playwright-cli/
 
 # === Logs ===
 logs/

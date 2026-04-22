@@ -19,6 +19,7 @@ REQUIRED_TABLES = (
     "attendance_dead_letters",
     "pgqueuer",
     "personal_allowances",
+    "user_performance_allowances",
 )
 REQUIRED_AUDIT_ACTIONS = frozenset(action.value for action in AuditAction)
 REQUIRED_AUDIT_STATUSES = frozenset(status.value for status in AuditStatus)

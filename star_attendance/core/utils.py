@@ -17,6 +17,7 @@ print_lock = threading.RLock()
 # Use ContextVar instead of threading.local for asyncio compatibility
 _worker_context: ContextVar[str] = ContextVar("worker_context", default="")
 _log_collector: ContextVar[list[str] | None] = ContextVar("log_collector", default=None)
+TELEGRAM_LOG_SCOPE_BLOCKLIST = frozenset({"AUTH"})
 
 
 # --- Async Broadcast Manager ---
@@ -57,10 +58,10 @@ class LogBroadcastManager:
                         pass  # Silently fail if DB is busy or down
 
                 # Broadcast to Telegram Log Group
-                if (
-                    settings.LOG_TELEGRAM_ENABLED
-                    and item.get("level") in {"ERROR", "WARN", "SUCCESS"}
-                    and not item.get("skip_telegram")
+                if should_broadcast_to_telegram(
+                    level=str(item.get("level") or ""),
+                    scope=str(item.get("scope") or ""),
+                    skip_telegram=bool(item.get("skip_telegram")),
                 ):
                     try:
                         log_msg = f"<b>[{item['level']}]</b> [{item['scope']}]\n{item['message']}"
@@ -105,6 +106,16 @@ broadcast_manager = LogBroadcastManager()
 
 def get_timestamp():
     return format_log_timestamp()
+
+
+def should_broadcast_to_telegram(*, level: str, scope: str, skip_telegram: bool = False) -> bool:
+    if skip_telegram or not settings.LOG_TELEGRAM_ENABLED:
+        return False
+    if level not in {"ERROR", "WARN", "SUCCESS"}:
+        return False
+    if str(scope).upper() in TELEGRAM_LOG_SCOPE_BLOCKLIST:
+        return False
+    return True
 
 
 def set_context(context):

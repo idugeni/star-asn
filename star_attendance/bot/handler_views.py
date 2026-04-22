@@ -17,9 +17,12 @@ UserPayload = Mapping[str, Any]
 def _format_coords(user: UserPayload) -> str:
     latitude = user.get("latitude")
     longitude = user.get("longitude")
-    if latitude is None or longitude is None:
+    if not latitude or not longitude:
         return "BELUM TERSEDIA"
-    return f"{float(latitude):.6f}, {float(longitude):.6f}"
+    try:
+        return f"{float(latitude):.6f}, {float(longitude):.6f}"
+    except (ValueError, TypeError):
+        return "FORMAT TIDAK VALID"
 
 
 def _format_source(source: str | None) -> str:
@@ -192,11 +195,15 @@ def build_manage_user_message(user: UserPayload) -> str:
     )
     work_indicator = "KHUSUS" if user.get("workdays_source") == "personal" else "GLOBAL"
     
-    coords = (
-        f"{float(user['latitude']):.6f}, {float(user['longitude']):.6f}"
-        if user.get("latitude") is not None and user.get("longitude") is not None
-        else "BELUM DISET"
-    )
+    try:
+        lat = user.get("latitude")
+        lon = user.get("longitude")
+        if lat and lon:
+            coords = f"{float(lat):.6f}, {float(lon):.6f}"
+        else:
+            coords = "BELUM DISET"
+    except (ValueError, TypeError):
+        coords = "FORMAT TIDAK VALID"
 
     response = (
         f"<b>🛠 MANAJEMEN: {user['nama']}</b>\n"

@@ -48,6 +48,7 @@ from star_attendance.bot.handler_views import (
 )
 from star_attendance.bot.ui import get_main_menu, get_users_keyboard, is_admin
 from star_attendance.core.options import RuntimeOptions
+from star_attendance.bot.cleanup import clean_incoming, auto_delete_message
 from star_attendance.runtime import get_internal_api_client, get_store
 
 store = get_store()
@@ -82,21 +83,6 @@ async def edit_smart(message: Message, text: str, reply_markup: Any = None) -> N
     await edit_smart_impl(message, text, reply_markup)
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await start_impl(
-        update,
-        context,
-        store=store,
-        is_admin_fn=is_admin,
-        build_dashboard_message=_build_dashboard_message,
-        get_main_menu_fn=get_main_menu,
-    )
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await help_command_impl(update, context, is_admin_fn=is_admin)
-
-
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await handle_callback_impl(
         update,
@@ -116,32 +102,47 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 def get_user_manage_keyboard(nip: str):
     return build_user_manage_keyboard(nip)
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await clean_incoming(update)
+    await start_impl(
+        update,
+        context,
+        store=store,
+        is_admin_fn=is_admin,
+        build_dashboard_message=_build_dashboard_message,
+        get_main_menu_fn=get_main_menu,
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await clean_incoming(update)
+    await help_command_impl(update, context, is_admin_fn=is_admin)
 
 async def absen_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await clean_incoming(update)
     await absen_manual_impl(update, context, is_admin_fn=is_admin, build_runtime_options=_build_runtime_options)
 
-
 async def manage_nip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await clean_incoming(update)
     await manage_nip_impl(update, context, store=store, is_admin_fn=is_admin)
 
-
 async def manage_pass(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await clean_incoming(update)
     await manage_pass_impl(update, context, store=store, is_admin_fn=is_admin)
 
-
 async def manage_hapus(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await clean_incoming(update)
     await manage_hapus_impl(update, context, store=store, is_admin_fn=is_admin)
 
-
 async def profil_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await clean_incoming(update)
     await profil_command_impl(update, context, store=store)
 
-
 async def manage_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await clean_incoming(update)
     await manage_name_impl(update, context, store=store, is_admin_fn=is_admin)
 
-
 async def manage_upt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await clean_incoming(update)
     await manage_upt_impl(update, context, store=store, is_admin_fn=is_admin)
 
 

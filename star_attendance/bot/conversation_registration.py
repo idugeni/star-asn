@@ -17,8 +17,8 @@ internal_api = get_internal_api_client()
 async def start_reg(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     message = (
-        "📝 <b>REGISTRASI PERSONEL BARU</b>\n────────────────\n"
-        "Selamat datang di sistem Star-ASN. Silakan masukkan <b>Nomor Induk Pegawai (NIP)</b> Anda untuk memulai:"
+        "📝 <b>REGISTRASI AKUN ANDA</b>\n────────────────\n"
+        "Selamat datang di sistem Star-ASN. Silakan masukkan <b>Nomor Induk Pegawai (NIP)</b> Anda sendiri untuk memulai:"
     )
     if query and query.message and isinstance(query.message, Message):
         await query.answer()
