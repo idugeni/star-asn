@@ -147,12 +147,29 @@ class AttendanceEngine:
             return default
 
         message = login_result.get("message")
-        if message not in (None, ""):
+        failure_stage = str(login_result.get("failure_stage") or "").strip()
+
+        # 1. Map failure stages to friendly messages
+        if failure_stage in LOGIN_FAILURE_STAGE_MESSAGES:
+            return LOGIN_FAILURE_STAGE_MESSAGES[failure_stage]
+
+        # 2. If a direct human-friendly message exists (and isn't just an exception trace), use it
+        if message and not any(x in str(message).lower() for x in ["exception", "curl:", "failed to perform"]):
             return str(message)
 
-        failure_stage = str(login_result.get("failure_stage") or "").strip()
-        if failure_stage:
-            return LOGIN_FAILURE_STAGE_MESSAGES.get(failure_stage, f"Login gagal ({failure_stage})")
+        # 3. Deep Technical Inspection for network codes
+        err_str = str(message or login_result).lower()
+        if "curl: (7)" in err_str:
+            return "❌ Portal Down atau koneksi ditolak (Curl 7)."
+        if "curl: (28)" in err_str or "timed out" in err_str:
+            return "⏳ Koneksi timeout (Portal lambat/Down)."
+        if "curl: (35)" in err_str or "ssl" in err_str:
+            return "🔒 Kesalahan Sertifikat SSL Portal."
+        if "502" in err_str or "503" in err_str or "504" in err_str:
+            return "🚧 Portal sedang down atau overload (Gateway Error)."
+        
+        if message:
+            return str(message)
 
         status = str(login_result.get("status") or "").strip()
         if status:

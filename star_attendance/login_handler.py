@@ -778,6 +778,7 @@ class LoginHandler:
                     failure_reason = f"Network Exception: {e}"
                 
                 log("ERROR", f"event=login status=failed stage={failure_stage} error={e}")
+                await portal_circuit_breaker.record_failure(failure_reason)
                 await asyncio.sleep(1)
 
         return self.build_result(

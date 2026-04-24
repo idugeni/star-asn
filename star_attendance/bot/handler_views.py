@@ -100,16 +100,29 @@ def build_startup_dashboard(metrics: dict[str, Any]) -> str:
     except Exception:
         pass
 
-    cpu = psutil.cpu_percent(interval=0.1)
-    ram = psutil.virtual_memory().percent
+    # Process-specific CPU usage is more accurate in Docker
+        proc = psutil.Process(os.getpid())
+        cpu = proc.cpu_percent(interval=0.5)
+        mem_info = proc.memory_info().rss / (1024 * 1024) # MB
+    except:
+        cpu = 0.0
+        mem_info = 0.0
+    ram_pct = psutil.virtual_memory().percent
     
     # Process Uptime
     try:
         proc = psutil.Process(os.getpid())
         uptime_seconds = int(time.time() - proc.create_time())
-        uptime_hours = uptime_seconds // 3600
+        if uptime_seconds < 60:
+            uptime_str = f"{uptime_seconds} detik"
+        elif uptime_seconds < 3600:
+            uptime_str = f"{uptime_seconds // 60} menit"
+        else:
+            hours = uptime_seconds // 3600
+            minutes = (uptime_seconds % 3600) // 60
+            uptime_str = f"{hours} jam {minutes} menit"
     except:
-        uptime_hours = 0
+        uptime_str = "0 detik"
     
     db_status = metrics.get("db_provider", "Disconnected")
     if metrics.get("active_personnel", 0) > 0:
@@ -121,9 +134,9 @@ def build_startup_dashboard(metrics: dict[str, Any]) -> str:
     section1 = (
         f"💻 <b>NODE:</b> <code>{node_id}</code>\n"
         f"📡 <b>IP:</b> <code>{public_ip}</code>\n"
-        f"⚙️ <b>CPU:</b> <code>{cpu}%</code>\n"
-        f"🧠 <b>RAM:</b> <code>{ram}%</code>\n"
-        f"🕒 <b>UPTIME:</b> {uptime_hours} jam\n"
+        f"⚙️ <b>CPU:</b> <code>{cpu:.1f}%</code>\n"
+        f"🧠 <b>RAM:</b> <code>{mem_info:.1f} MB</code> (Sistem: {ram_pct}%)\n"
+        f"🕒 <b>UPTIME:</b> {uptime_str}\n"
         f"🗄 <b>DB:</b> <code>{db_status}</code>"
     )
     
