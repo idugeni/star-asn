@@ -36,12 +36,12 @@ from star_attendance.bot.handler_commands import (
     start as start_impl,
 )
 from star_attendance.bot.handler_views import (
-    build_dashboard_message,
-    build_global_settings_message,
-    build_scheduler_message,
+    build_dashboard_message as build_dashboard_message_impl,
+    build_global_settings_message as build_global_settings_message_impl,
+    build_scheduler_message as build_scheduler_message_impl,
     build_user_manage_keyboard,
-    get_global_settings_keyboard,
-    get_scheduler_keyboard,
+    get_global_settings_keyboard as get_global_settings_keyboard_impl,
+    get_scheduler_keyboard as get_scheduler_keyboard_impl,
 )
 from star_attendance.bot.handler_views import (
     edit_smart as edit_smart_impl,
@@ -60,23 +60,23 @@ def build_runtime_options(action: str) -> RuntimeOptions:
 
 
 def build_dashboard_message(user: Mapping[str, Any] | None) -> str:
-    return build_dashboard_message(user, store=store)
+    return build_dashboard_message_impl(user, store=store)
 
 
 def get_global_settings_keyboard():
-    return get_global_settings_keyboard()
+    return get_global_settings_keyboard_impl()
 
 
 def build_global_settings_message() -> str:
-    return build_global_settings_message(store=store)
+    return build_global_settings_message_impl(store=store)
 
 
 def get_scheduler_keyboard():
-    return get_scheduler_keyboard()
+    return get_scheduler_keyboard_impl()
 
 
 def build_scheduler_message(status_payload: Mapping[str, Any]) -> str:
-    return build_scheduler_message(status_payload)
+    return build_scheduler_message_impl(status_payload)
 
 
 async def edit_smart(message: Message, text: str, reply_markup: Any = None) -> None:
@@ -109,7 +109,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context,
         store=store,
         is_admin_fn=is_admin,
-        build_dashboard_message=_build_dashboard_message,
+        build_dashboard_message=build_dashboard_message,
         get_main_menu_fn=get_main_menu,
     )
 
@@ -119,7 +119,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def absen_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await clean_incoming(update)
-    await absen_manual_impl(update, context, is_admin_fn=is_admin, build_runtime_options=_build_runtime_options)
+    await absen_manual_impl(update, context, is_admin_fn=is_admin, build_runtime_options=build_runtime_options)
 
 async def manage_nip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await clean_incoming(update)
@@ -147,12 +147,12 @@ async def manage_upt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 __all__ = [
-    "_build_dashboard_message",
-    "_build_global_settings_message",
-    "_build_runtime_options",
-    "_build_scheduler_message",
-    "_get_global_settings_keyboard",
-    "_get_scheduler_keyboard",
+    "build_dashboard_message",
+    "build_global_settings_message",
+    "build_runtime_options",
+    "build_scheduler_message",
+    "get_global_settings_keyboard",
+    "get_scheduler_keyboard",
     "absen_manual",
     "edit_smart",
     "get_user_manage_keyboard",

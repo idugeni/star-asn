@@ -150,9 +150,11 @@ class TelegramNotifier:
         
         # If delete_after is provided, we send it sync to get the ID, then schedule deletion
         if delete_after and self.is_active:
-            res = self.send_now(message, [str(chat_id)])
-            if res and int(chat_id) in res:
-                msg_id = res[int(chat_id)]
+            chat_id_str = str(chat_id)
+            res = self.send_now(message, [chat_id_str])
+            chat_id_int = int(chat_id_str)
+            if res and chat_id_int in res:
+                msg_id = res[chat_id_int]
                 # Schedule deletion via a simple thread to not block the main logic
                 def del_task():
                     import time

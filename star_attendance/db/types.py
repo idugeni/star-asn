@@ -33,6 +33,10 @@ class UserData(TypedDict):
     is_active: bool
     auto_attendance_active: bool
     auto_attendance_reason: str
+    jabatan: str
+    divisi: str
+    pangkat: str
+    email: str
 
 
 class SessionData(TypedDict):

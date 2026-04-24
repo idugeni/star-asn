@@ -192,7 +192,7 @@ async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 await update.message.reply_text(f"❌ Nilai tidak valid: {exc}")
             return WAIT_ADMIN_INPUT_VAL
 
-        updated = store.update_global_settings({field: parsed_value})
+        updated = store.update_settings({field: parsed_value})
         if update.message:
             header = f"✅ <b>GLOBAL SETTING {field.upper()} DIPERBARUI</b>\n────────────────\n"
             body = build_global_settings_message(store=store)

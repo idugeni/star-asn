@@ -50,6 +50,12 @@ class User(Base):
     personal_latitude = Column(Float, nullable=True)
     personal_longitude = Column(Float, nullable=True)
 
+    # Extended profile from SSO
+    jabatan = Column(String(255), nullable=True)
+    divisi = Column(String(255), nullable=True)
+    pangkat = Column(String(100), nullable=True)
+    email = Column(String(255), nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=now_storage)
     updated_at = Column(DateTime(timezone=True), default=now_storage, onupdate=now_storage)
 
@@ -152,3 +158,13 @@ class UserPerformanceAllowance(Base):
     updated_at = Column(DateTime(timezone=True), default=now_storage, onupdate=now_storage, nullable=False)
 
     user = relationship("User")
+
+
+class BotMessage(Base):
+    __tablename__ = "bot_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    telegram_id = Column(BigInteger, nullable=False, index=True)
+    chat_id = Column(BigInteger, nullable=False)
+    message_id = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=now_storage, index=True)

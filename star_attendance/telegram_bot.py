@@ -8,12 +8,14 @@ warnings.filterwarnings("ignore", category=PTBUserWarning)
 
 from telegram import BotCommand, MenuButtonWebApp, WebAppInfo
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
     ConversationHandler,
     MessageHandler,
     filters,
+    ExtBot,
 )
 
 # Import our modular components
@@ -219,7 +221,25 @@ async def post_init(application):
     except Exception as e:
         logger.error(f"Failed in post_init telemetry: {e}", exc_info=True)
 
+    from star_attendance.bot.cleanup import start_global_cleanup_task
+    asyncio.create_task(start_global_cleanup_task(application))
+    
     logger.info("post-init completed")
+
+
+class RecordedBot(ExtBot):
+    """Custom Bot class that automatically records sent messages for auto-cleanup."""
+    async def send_message(self, *args, **kwargs):
+        msg = await super().send_message(*args, **kwargs)
+        from star_attendance.bot.cleanup import record_message
+        asyncio.create_task(record_message(msg))
+        return msg
+
+    async def send_photo(self, *args, **kwargs):
+        msg = await super().send_photo(*args, **kwargs)
+        from star_attendance.bot.cleanup import record_message
+        asyncio.create_task(record_message(msg))
+        return msg
 
 
 def main():
@@ -230,7 +250,7 @@ def main():
 
     verify_runtime_schema(require_pgqueuer=True)
 
-    app = ApplicationBuilder().token(token).post_init(post_init).build()
+    app = ApplicationBuilder().token(token).bot_class(RecordedBot).post_init(post_init).build()
 
     # Registration Conversation
     reg_handler = ConversationHandler(

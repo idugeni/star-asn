@@ -21,7 +21,7 @@ from star_attendance.core.timeutils import (
 )
 from star_attendance.db.enums import AuditAction, AuditStatus
 from star_attendance.db.manager import db_manager
-from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserPerformanceAllowance, UserSession, PersonalAllowance
+from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserPerformanceAllowance, UserSession, PersonalAllowance, BotMessage
 from star_attendance.db.types import AuditLogData, UserData
 
 DEFAULT_LOCATION_LATITUDE = -6.2210973
@@ -405,6 +405,10 @@ class SupabaseManager:
             "is_active": is_active,
             "auto_attendance_active": auto_attendance_active,
             "auto_attendance_reason": auto_attendance_reason,
+            "jabatan": str(user.jabatan) if getattr(user, "jabatan", None) else "-",
+            "divisi": str(user.divisi) if getattr(user, "divisi", None) else "-",
+            "pangkat": str(user.pangkat) if getattr(user, "pangkat", None) else "-",
+            "email": str(user.email) if getattr(user, "email", None) else "-",
         }
 
     # --- USER OPERATIONS (POSTGRES PRIMARY) ---
@@ -558,6 +562,15 @@ class SupabaseManager:
                 encrypted_password = self.encrypt_password(settings_update["password"])
                 if encrypted_password is not None:
                     user.password = encrypted_password
+            
+            if "jabatan" in settings_update:
+                user.jabatan = str(settings_update["jabatan"])
+            if "divisi" in settings_update:
+                user.divisi = str(settings_update["divisi"])
+            if "pangkat" in settings_update:
+                user.pangkat = str(settings_update["pangkat"])
+            if "email" in settings_update:
+                user.email = str(settings_update["email"])
 
             if "upt_id" in settings_update:
                 user.upt_id = self.resolve_upt_id(session, settings_update["upt_id"])
@@ -798,6 +811,31 @@ class SupabaseManager:
                     ):
                         result["out"] = latest_timestamp
             return result
+
+    # --- BOT MESSAGE TRACKING (AUTO-CLEAN) ---
+
+    def record_bot_message(self, telegram_id: int, chat_id: int, message_id: int) -> None:
+        with db_manager.get_session() as session:
+            session.add(
+                BotMessage(
+                    telegram_id=telegram_id,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                )
+            )
+
+    def get_old_bot_messages(self, hours: int = 24) -> list[dict[str, Any]]:
+        threshold = now_storage() - timedelta(hours=hours)
+        with db_manager.get_session() as session:
+            msgs = session.query(BotMessage).filter(BotMessage.created_at < threshold).limit(100).all()
+            return [
+                {"id": m.id, "chat_id": m.chat_id, "message_id": m.message_id}
+                for m in msgs
+            ]
+
+    def delete_bot_message_record(self, record_id: Any) -> None:
+        with db_manager.get_session() as session:
+            session.query(BotMessage).filter(BotMessage.id == record_id).delete()
 
     def get_user_history(self, nip: str, limit: int = 10) -> list[AuditLogData]:
         with db_manager.get_session() as session:

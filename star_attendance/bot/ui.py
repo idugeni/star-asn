@@ -56,6 +56,10 @@ def get_back_button(target: str = "main_menu") -> InlineKeyboardButton:
     return InlineKeyboardButton("🔙 KEMBALI KE BERANDA", callback_data=target)
 
 
+def get_sync_sso_button() -> InlineKeyboardButton:
+    return InlineKeyboardButton("🔄 SINKRONISASI DATA DARI MASTER SSO", callback_data="sync_sso_profile")
+
+
 async def get_main_menu(telegram_id: int) -> InlineKeyboardMarkup:
     is_adm = is_admin(telegram_id)
     keyboard = [

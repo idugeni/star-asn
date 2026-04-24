@@ -346,7 +346,7 @@ async def mass_attendance(limit: int | None = None, options: Any = None) -> dict
 
             batch = users[start : start + batch_size]
             entrypoints = ["attendance.process"] * len(batch)
-            payloads = [
+            payloads: list[bytes | None] = [
                 encode_queue_payload(
                     {
                         "nip": user["nip"],

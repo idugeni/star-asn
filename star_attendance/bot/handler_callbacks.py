@@ -11,7 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes
 
 from star_attendance.bot.telemetry import monitor_mass_progress
-from star_attendance.bot.ui import get_back_button, get_settings_menu
+from star_attendance.bot.ui import get_back_button, get_settings_menu, get_sync_sso_button
 from star_attendance.core.config import settings
 from star_attendance.core.processor import mass_attendance, process_single_user
 from star_attendance.core.timeutils import format_formal_date, format_formal_timestamp, now_local
@@ -119,8 +119,11 @@ async def show_profile(message: Message, *, services: CallbackServices, tid: int
         "<b>🆔 PROFIL DIGITAL ASN</b>\n────────────────\n"
         f"👤 <b>NAMA:</b> <code>{user['nama']}</code>\n"
         f"🆔 <b>NIP:</b> <code>{user['nip']}</code>\n"
-        f"📲 <b>TELEGRAM ID:</b> <code>{user.get('telegram_id') or '-'}</code>\n"
-        f"🏢 <b>CABANG:</b> <code>{user.get('nama_upt', 'DEFAULT')}</code>\n"
+        f"🎖️ <b>PANGKAT:</b> <code>{user.get('pangkat', '-')}</code>\n"
+        f"🛡️ <b>JABATAN:</b> <code>{user.get('jabatan', '-')}</code>\n"
+        f"📂 <b>DIVISI:</b> <code>{user.get('divisi', '-')}</code>\n"
+        f"📧 <b>EMAIL:</b> <code>{user.get('email', '-')}</code>\n"
+        f"🏢 <b>UNIT:</b> <code>{user.get('nama_upt', 'DEFAULT')}</code>\n"
         "────────────────\n"
         f"⏰ <b>OTOMASI IN:</b> <code>{user['cron_in']}</code>{in_label}\n"
         f"⏰ <b>OTOMASI OUT:</b> <code>{user['cron_out']}</code>{out_label}\n"
@@ -133,7 +136,65 @@ async def show_profile(message: Message, *, services: CallbackServices, tid: int
         "────────────────\n"
         f"💎 <b>STATUS:</b> <b>{settings.BOT_EDITION}</b>"
     )
-    await services.edit_message(message, response, InlineKeyboardMarkup([[get_back_button()]]))
+    await services.edit_message(message, response, InlineKeyboardMarkup([[get_sync_sso_button()], [get_back_button()]]))
+
+
+async def sync_sso_profile(message: Message, *, services: CallbackServices, tid: int) -> None:
+    user = services.store.get_user_by_telegram_id(tid)
+    if not user:
+        return
+
+    await message.edit_text(
+        "⏳ <b>SEDANG SINKRONISASI DATA SSO...</b>\n"
+        "<i>Menghubungkan ke portal SSO Pusat untuk memverifikasi data Anda.</i>",
+        parse_mode=constants.ParseMode.HTML,
+    )
+
+    from star_attendance.sso_handler import sync_sso_data
+
+    try:
+        # Use existing credentials for SSO
+        res = await sync_sso_data(user["nip"], user["password"])
+        if res["status"] == "success":
+            data = res["data"]
+            # Update user profile in local DB
+            update_payload = {}
+            if data.get("nama"):
+                update_payload["nama"] = data["nama"]
+            if data.get("nama_upt"):
+                update_payload["upt_id"] = data["nama_upt"]
+            
+            # Additional SSO fields
+            if data.get("jabatan"): update_payload["jabatan"] = data["jabatan"]
+            if data.get("divisi"): update_payload["divisi"] = data["divisi"]
+            if data.get("pangkat"): update_payload["pangkat"] = data["pangkat"]
+            if data.get("email"): update_payload["email"] = data["email"]
+
+            if update_payload:
+                services.store.update_user_settings(user["nip"], update_payload)
+
+            await message.edit_text(
+                "✅ <b>SINKRONISASI BERHASIL</b>\n"
+                f"Data Anda telah diperbarui dari sistem pusat.\n\n"
+                f"👤 <b>Nama:</b> <code>{data.get('nama')}</code>\n"
+                f"🏢 <b>Unit:</b> <code>{data.get('nama_upt')}</code>\n"
+                f"🛡️ <b>Jabatan:</b> <code>{data.get('jabatan')}</code>\n"
+                f"📧 <b>Email:</b> <code>{data.get('email')}</code>",
+                parse_mode=constants.ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]])
+            )
+        else:
+            await message.edit_text(
+                f"❌ <b>GAGAL SINKRONISASI</b>\n<code>{res.get('message', 'Unknown Error')}</code>",
+                parse_mode=constants.ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]])
+            )
+    except Exception as exc:
+        await message.edit_text(
+            f"❌ <b>SISTEM ERROR</b>\n<code>{exc}</code>",
+            parse_mode=constants.ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]])
+        )
 
 
 async def show_scheduler(message: Message, *, services: CallbackServices, restart: bool = False) -> None:
@@ -386,6 +447,7 @@ async def handle_callback(
     message = query.message
 
     try:
+        target_nip: str | None = None
         if data == "noop":
             return
         if data == "main_menu":
@@ -423,6 +485,9 @@ async def handle_callback(
             return
         if data == "view_profile":
             await show_profile(message, services=services, tid=tid)
+            return
+        if data == "sync_sso_profile":
+            await sync_sso_profile(message, services=services, tid=tid)
             return
         if data == "view_global_settings":
             if not services.is_admin(tid):
@@ -515,7 +580,7 @@ async def handle_callback(
                 target_nip = parts[3] if len(parts) > 3 else None
                 
                 # Check if we have data locally
-                nip = target_nip
+                nip: str | None = target_nip
                 if not nip:
                     u = services.store.get_user_by_telegram_id(tid)
                     nip = u["nip"] if u else None
