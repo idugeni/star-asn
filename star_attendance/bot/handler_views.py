@@ -54,10 +54,14 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
         out_label = ""
 
         body = (
-            "👤 <b>DATA PERSONEL</b>\n"
+            "👤 <b>PROFIL DIGITAL ASN</b>\n"
             f"  ├ NAMA: <code>{user['nama']}</code>\n"
             f"  ├ NIP: <code>{user['nip']}</code>\n"
             f"  ├ TELEGRAM ID: <code>{telegram_id}</code>\n"
+            f"  ├ PANGKAT: <code>{user.get('pangkat') or '-'}</code>\n"
+            f"  ├ JABATAN: <code>{user.get('jabatan') or '-'}</code>\n"
+            f"  ├ DIVISI: <code>{user.get('divisi') or '-'}</code>\n"
+            f"  ├ EMAIL: <code>{user.get('email') or '-'}</code>\n"
             f"  └ UNIT: <code>{user.get('nama_upt', 'CLUSTER DEFAULT')}</code>\n\n"
             "⏰ <b>JADWAL ABSENSI OTOMATIS</b>\n"
             f"  ├ JAM MASUK: <code>{user['cron_in']}</code>{in_label}\n"
@@ -79,8 +83,8 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
 
     footer = (
         "────────────────\n"
-        f"⚡ <b>STATUS:</b> <code>READY</code> ({format_formal_timestamp()})\n"
-        f"💎 <b>EDITION:</b> <b>{settings.BOT_EDITION}</b>"
+        f"💎 <b>STATUS:</b> ENTERPRISE PREMIUM\n"
+        f"⚡ <b>UPDATED:</b> <code>{format_formal_timestamp()}</code>"
     )
     return f"{header}\n────────────────\n{body}\n{footer}"
 
