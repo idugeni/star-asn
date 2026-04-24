@@ -61,7 +61,7 @@ docker compose -f docker-compose.dev.yml exec api ruff format api/
 - All dependencies pre-installed
 - Debugging available
 - Terminal runs inside container
-- Port 8000 auto-forwarded
+- Port 11800 auto-forwarded
 
 **Run commands in VS Code terminal:**
 ```bash
@@ -121,14 +121,14 @@ docker compose -f docker-compose.dev.yml exec api bash
 
 ## 🔍 Troubleshooting
 
-### "Port 8000 already in use"
+### "Port 11800 already in use"
 ```bash
-# Kill whatever is using port 8000
+# Kill whatever is using port 11800
 # macOS/Linux:
-lsof -i :8000 | grep LISTEN | awk '{print $2}' | xargs kill -9
+lsof -i :11800 | grep LISTEN | awk '{print $2}' | xargs kill -9
 
 # Windows:
-netstat -ano | findstr :8000
+netstat -ano | findstr :11800
 taskkill /PID <PID> /F
 ```
 

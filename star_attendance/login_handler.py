@@ -97,12 +97,12 @@ def log(level: str, msg: str) -> None:
 
 
 class LoginHandler:
-    _dddd: Any = None  # ddddocr singleton
-    _waf_cookies: list[CookieData] | None = None  # Shared WAF cookies
-    _waf_lock = asyncio.Lock()
-    _last_browser_tkv: str | None = None  # Captured from browser during bypass
-    _ocr_init_lock = threading.Lock()
-    _public_ip: str = "N/A"
+    dddd_ocr: Any = None  # ddddocr singleton
+    shared_waf_cookies: list[CookieData] | None = None  # Shared WAF cookies
+    waf_global_lock = asyncio.Lock()
+    last_browser_tkv: str | None = None  # Captured from browser during bypass
+    ocr_init_lock = threading.Lock()
+    cached_public_ip: str = "N/A"
 
     def __init__(
         self,
@@ -120,8 +120,8 @@ class LoginHandler:
             self.client.headers["User-Agent"] = user_agent
 
         # --- "MASTER OF MASTER" INJECTION ---
-        if LoginHandler._waf_cookies and isinstance(LoginHandler._waf_cookies, list):
-            for c in LoginHandler._waf_cookies:
+        if LoginHandler.shared_waf_cookies and isinstance(LoginHandler.shared_waf_cookies, list):
+            for c in LoginHandler.shared_waf_cookies:
                 if not isinstance(c, dict):
                     continue
                 cookie = cast(CookieData, c)
@@ -136,7 +136,7 @@ class LoginHandler:
                     continue
 
         # Initialize OCR Engines (Singleton pattern - Ensure it exists)
-        if LoginHandler._dddd is None:
+        if LoginHandler.dddd_ocr is None:
             pass
         
         self.captcha_mode = settings.CAPTCHA_MODE.lower()
@@ -145,15 +145,15 @@ class LoginHandler:
 
     @property
     def ocr(self) -> Any:
-        if LoginHandler._dddd is None:
-            with LoginHandler._ocr_init_lock:
-                if LoginHandler._dddd is None:
-                    log("INFO", "event=ocr_init status=start message='Initializing ddddocr engine (Singleton)'")
-                    LoginHandler._dddd = ddddocr.DdddOcr()
-                    log("SUCCESS", "event=ocr_init status=complete")
-        return LoginHandler._dddd
+        if LoginHandler.dddd_ocr is None:
+            with LoginHandler.ocr_init_lock:
+                if LoginHandler.dddd_ocr is None:
+                    log("INFO", "event=ocr-init status=start message='Initializing ddddocr engine (Singleton)'")
+                    LoginHandler.dddd_ocr = ddddocr.DdddOcr()
+                    log("SUCCESS", "event=ocr-init status=complete")
+        return LoginHandler.dddd_ocr
 
-    def _build_result(
+    def build_result(
         self,
         status: str,
         *,
@@ -169,7 +169,7 @@ class LoginHandler:
     ) -> dict[str, Any]:
         waf_status = "ACTIVE"
         if cookies:
-            waf_cookies = self._extract_shared_waf_cookies(cookies if isinstance(cookies, list) else [])
+            waf_cookies = self.extract_shared_waf_cookies(cookies if isinstance(cookies, list) else [])
             if waf_cookies:
                 waf_status = "BYPASSED"
 
@@ -179,7 +179,7 @@ class LoginHandler:
             "session_source": session_source,
             "failure_stage": failure_stage,
             "waf_status": waf_status,
-            "public_ip": public_ip or self.__class__._public_ip,
+            "public_ip": public_ip or self.__class__.cached_public_ip,
             "user_agent": self.user_agent,
         }
         if cookies is not None:
@@ -195,7 +195,7 @@ class LoginHandler:
         return result
 
     @staticmethod
-    def _format_cookie_payload(cookies_list: list[dict[str, Any]]) -> list[CookieData]:
+    def format_cookie_payload(cookies_list: list[dict[str, Any]]) -> list[CookieData]:
         payload: list[CookieData] = []
         for cookie in cookies_list:
             name = str(cookie.get("name") or "").strip()
@@ -212,7 +212,7 @@ class LoginHandler:
         return payload
 
     @classmethod
-    def _extract_shared_waf_cookies(cls, cookies: list[CookieData] | None) -> list[CookieData]:
+    def extract_shared_waf_cookies(cls, cookies: list[CookieData] | None) -> list[CookieData]:
         if not cookies:
             return []
         # Strictly only share WAF related cookies, exclude anything else
@@ -220,11 +220,9 @@ class LoginHandler:
 
     @classmethod
     def cache_shared_waf_cookies(cls, cookies: list[CookieData] | None) -> None:
-        filtered = cls._extract_shared_waf_cookies(cookies)
-        if filtered:
-            cls._waf_cookies = filtered
+        cls.shared_waf_cookies = cls.extract_shared_waf_cookies(cookies)
 
-    def _apply_cookie_payload(self, cookies: list[CookieData] | None) -> None:
+    def apply_cookie_payload(self, cookies: list[CookieData] | None) -> None:
         for cookie in cookies or []:
             try:
                 name = cookie.get("name")
@@ -245,7 +243,7 @@ class LoginHandler:
             except Exception:
                 continue
 
-    def _is_waf_interstitial(self, html: str, title: str = "") -> bool:
+    def is_waf_interstitial(self, html: str, title: str = "") -> bool:
         normalized = f"{title}\n{html}".lower()
         return any(
             marker in normalized
@@ -261,10 +259,10 @@ class LoginHandler:
             )
         )
 
-    def _is_login_form_ready_html(self, html: str) -> bool:
+    def is_login_form_ready_html(self, html: str) -> bool:
         return all(marker in html for marker in ('name="tkv"', 'name="username"', 'name="password"'))
 
-    def _is_dashboard_html(self, html: str) -> bool:
+    def is_dashboard_html(self, html: str) -> bool:
         # Modern markers
         if 'class="user-name-text"' in html and 'name="csrf-token"' in html:
             return True
@@ -276,36 +274,36 @@ class LoginHandler:
             return True
         return False
 
-    def _message_is_invalid_credentials(self, message: str | None) -> bool:
+    def message_is_invalid_credentials(self, message: str | None) -> bool:
         normalized = str(message or "").lower()
         return any(
             token in normalized
             for token in ("belum terdaftar", "salah nip", "salah password", "login gagal", "password tidak ditemukan")
         )
 
-    def _message_is_captcha_failure(self, message: str | None) -> bool:
+    def message_is_captcha_failure(self, message: str | None) -> bool:
         normalized = str(message or "").lower()
         return "captcha" in normalized and any(token in normalized for token in ("salah", "invalid", "gagal"))
 
     @classmethod
     async def prime_waf_globally(cls, base_url: str = "https://star-asn.kemenimipas.go.id"):
-        async with cls._waf_lock:
-            if cls._waf_cookies:
-                log("INFO", "event=waf_priming status=skipped reason=already_primed")
+        async with cls.waf_global_lock:
+            if cls.shared_waf_cookies:
+                log("INFO", "event=waf-priming status=skipped reason=already-primed")
                 return True
 
-            log("INFO", "event=waf_priming status=start action=launching_master_identity")
+            log("INFO", "event=waf-priming status=start action=launching-master-identity")
             temp_handler = LoginHandler(base_url)
-            bootstrap_result = await temp_handler._solve_waf_challenge_via_browser()
+            bootstrap_result = await temp_handler.solve_waf_challenge_via_browser()
             cookies = cast(list[CookieData] | None, bootstrap_result.get("cookies") if bootstrap_result else None)
-            if bootstrap_result and bootstrap_result.get("status") == "success" and cookies:
+            if cookies:
                 cls.cache_shared_waf_cookies(cookies)
-                log("SUCCESS", "event=waf_priming status=complete action=master_gate_opened")
+                log("SUCCESS", "event=waf-priming status=complete action=master-gate-opened")
                 return True
-            log("ERROR", "event=waf_priming status=failed message='Master Identity could not open the gate'")
+            log("ERROR", "event=waf-priming status=failed message='Master Identity could not open the gate'")
             return False
 
-    def _black_ratio(self, img):
+    def black_ratio(self, img):
         if img is None:
             return 0.0
         if len(img.shape) == 3:
@@ -318,18 +316,18 @@ class LoginHandler:
         black = np.count_nonzero(gray < 200)
         return black / float(total)
 
-    def _enhance_gray(self, gray):
+    def enhance_gray(self, gray):
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
         return cv2.convertScaleAbs(enhanced, alpha=1.2, beta=0)
 
-    async def _get_best_candidates(self, image_bytes, min_conf=0.1):
+    async def get_best_candidates(self, image_bytes, min_conf=0.1):
         candidates = []
         
         # 1. Baseline raw
         res1 = self.ocr.classification(image_bytes)
         code1 = str(res1).strip().upper()
-        if self._is_valid_code(code1):
+        if self.is_valid_code(code1):
             candidates.append((1.0, code1, "raw"))
         else:
             log("DEBUG", f"OCR raw prediction invalid: '{code1}'")
@@ -340,7 +338,7 @@ class LoginHandler:
             _, enc = cv2.imencode(".png", variant)
             res2 = self.ocr.classification(enc.tobytes())
             code2 = str(res2).strip().upper()
-            if self._is_valid_code(code2) and code2 not in [c[1] for c in candidates]:
+            if self.is_valid_code(code2) and code2 not in [c[1] for c in candidates]:
                 candidates.append((0.9, code2, "enhanced"))
             elif code2 != code1:
                 log("DEBUG", f"OCR enhanced prediction invalid or duplicate: '{code2}'")
@@ -350,7 +348,7 @@ class LoginHandler:
             
         return candidates[:3]
 
-    async def _fetch_captcha_bytes(self):
+    async def fetch_captcha_bytes(self):
         url = f"{self.base_url}/authentication/captcha"
         ts = int(time.time() * 1000)
         try:
@@ -362,7 +360,7 @@ class LoginHandler:
             log("ERROR", f"fetch_captcha_bytes error: {e}")
             return None
 
-    def _is_valid_code(self, code):
+    def is_valid_code(self, code):
         clean_code = str(code or "").strip()
         if not clean_code or len(clean_code) != 6:
             return False
@@ -401,7 +399,7 @@ class LoginHandler:
 
     async def solve_captcha(self):
         try:
-            image_bytes = await self._fetch_captcha_bytes()
+            image_bytes = await self.fetch_captcha_bytes()
             if image_bytes is None:
                 return None
             res = await self.solve_captcha_bytes(image_bytes)
@@ -414,7 +412,7 @@ class LoginHandler:
         try:
             res = self.ocr.classification(image_bytes)
             res = str(res).strip().upper()
-            if self._is_valid_code(res):
+            if self.is_valid_code(res):
                 return {"prediction": res, "confidence": 1.0, "error": None}
             else:
                 variant = self.preprocess_image(image_bytes)
@@ -422,7 +420,7 @@ class LoginHandler:
                     _, encoded_img = cv2.imencode(".png", variant)
                     res2 = self.ocr.classification(encoded_img.tobytes())
                     res2 = str(res2).strip().upper()
-                    if self._is_valid_code(res2):
+                    if self.is_valid_code(res2):
                         return {"prediction": res2, "confidence": 0.9, "error": None}
                 log("WARN", f"Captcha prediction invalid format: {res}")
                 return {"prediction": res, "confidence": 0.5, "error": "invalid_code_format"}
@@ -430,23 +428,23 @@ class LoginHandler:
             log("ERROR", f"solve_captcha_bytes exception: {e}")
             return {"prediction": None, "confidence": None, "error": f"exception:{e}"}
 
-    async def _verify_dashboard_session(self) -> tuple[bool, str]:
+    async def verify_dashboard_session(self) -> tuple[bool, str]:
         """Confirm session is valid by reaching the dashboard."""
         try:
             resp = await self.client.get(f"{self.base_url}/home/dashboard", timeout=30.0)
             
             # Check for redirect or login page
             if "login" in str(resp.url).lower() or "<title>login" in resp.text.lower():
-                log("WARN", f"event=session_verify status=invalid reason=redirected_to_login url={resp.url}")
+                log("WARN", f"event=session-verify status=invalid reason=redirected-to-login url={resp.url}")
                 return False, "Portal mengarahkan kembali ke halaman login."
             
-            if self._is_dashboard_html(resp.text):
+            if self.is_dashboard_html(resp.text):
                 return True, "Dashboard tervalidasi."
                 
-            log("WARN", f"event=session_verify status=invalid reason=marker_missing title='{resp.text[:50]}...'")
+            log("WARN", f"event=session-verify status=invalid reason=marker-missing title='{resp.text[:50]}...'")
             return False, "Marker dashboard tidak ditemukan setelah login."
         except Exception as e:
-            log("ERROR", f"event=session_verify status=error message={e}")
+            log("ERROR", f"event=session-verify status=error message={e}")
             return False, f"Gagal verifikasi dashboard: {e}"
 
     async def ensure_portal_ready(
@@ -461,8 +459,8 @@ class LoginHandler:
         try:
             await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
-            log("ERROR", f"event=portal_ready status=navigation_failed error={e}")
-            return self._build_result(
+            log("ERROR", f"event=portal-ready status=navigation-failed error={e}")
+            return self.build_result(
                 "failed",
                 message=f"Gagal membuka halaman login portal: {e}",
                 session_source="BROWSER",
@@ -477,7 +475,7 @@ class LoginHandler:
         except Exception:
             pass
 
-        waf_detected = self._is_waf_interstitial(html, title)
+        waf_detected = self.is_waf_interstitial(html, title)
         if status_callback:
             await status_callback(
                 "🛡️ Menunggu security check portal..." if waf_detected else "🌐 Menyiapkan form login portal..."
@@ -503,49 +501,49 @@ class LoginHandler:
             failure_stage = "waf_timeout" if waf_detected else "login_form_unavailable"
             message = "WAF timeout sebelum form login tersedia." if waf_detected else "Form login portal tidak tersedia."
             diagnostic = f" diagnostic={shot_path}" if shot_path else ""
-            log("ERROR", f"event=portal_ready status=timeout stage={failure_stage} error={e}{diagnostic}")
-            return self._build_result(
+            log("ERROR", f"event=portal-ready status=timeout stage={failure_stage} error={e}{diagnostic}")
+            return self.build_result(
                 "failed",
                 message=message,
                 session_source="BROWSER",
                 failure_stage=failure_stage,
             )
 
-        log("SUCCESS", "event=portal_ready status=login_form_ready")
+        log("SUCCESS", "event=portal-ready status=login-form-ready")
         if status_callback:
             await status_callback("🔐 Form login portal siap.")
-        return self._build_result("success", message="Form login portal siap.", session_source="BROWSER")
+        return self.build_result("success", message="Form login portal siap.", session_source="BROWSER")
 
-    async def _bootstrap_portal_session_via_browser(
+    async def bootstrap_portal_session_via_browser(
         self,
         status_callback: Callable[[str], Coroutine[Any, Any, None]] | None = None,
     ) -> dict[str, Any]:
-        bootstrap = await self._solve_waf_challenge_via_browser(status_callback=status_callback)
+        bootstrap = await self.solve_waf_challenge_via_browser(status_callback=status_callback)
         if bootstrap and bootstrap.get("status") == "success":
             cookies = cast(list[CookieData], bootstrap.get("cookies") or [])
-            self._apply_cookie_payload(cookies)
+            self.apply_cookie_payload(cookies)
             LoginHandler.cache_shared_waf_cookies(cookies)
-            return self._build_result(
+            return self.build_result(
                 "success",
                 message="Portal login siap.",
                 session_source="BROWSER",
                 cookies=cookies,
             )
         if bootstrap:
-            return self._build_result(
+            return self.build_result(
                 str(bootstrap.get("status") or "failed"),
                 message=str(bootstrap.get("message") or "Form login portal tidak tersedia."),
                 session_source=str(bootstrap.get("session_source") or "BROWSER"),
                 failure_stage=cast(str | None, bootstrap.get("failure_stage")),
             )
-        return self._build_result(
+        return self.build_result(
             "failed",
             message="Form login portal tidak tersedia.",
             session_source="BROWSER",
             failure_stage="login_form_unavailable",
         )
 
-    async def _open_dashboard_in_browser(self, page: Any) -> tuple[bool, str, str]:
+    async def open_dashboard_in_browser(self, page: Any) -> tuple[bool, str, str]:
         try:
             await page.goto(f"{self.base_url}/home/dashboard", wait_until="domcontentloaded", timeout=25000)
         except Exception:
@@ -564,11 +562,11 @@ class LoginHandler:
             pass
 
         content = await page.content()
-        if "login" not in page.url.lower() and self._is_dashboard_html(content):
+        if "login" not in page.url.lower() and self.is_dashboard_html(content):
             return True, "Dashboard tervalidasi.", ""
-        if self._message_is_invalid_credentials(content):
+        if self.message_is_invalid_credentials(content):
             return False, "NIP atau password portal tidak valid.", "invalid_credentials"
-        if self._message_is_captcha_failure(content):
+        if self.message_is_captcha_failure(content):
             return False, "Captcha portal tidak valid.", "captcha_failed"
         return False, "Dashboard tidak dapat diakses setelah login.", "dashboard_unreachable"
 
@@ -589,46 +587,47 @@ class LoginHandler:
             await status_callback("🛡️ Menyiapkan koneksi aman (WAF)...")
 
         if not await portal_circuit_breaker.allow_request():
-            log("WARN", "event=portal_circuit status=open action=skip_login")
+            log("WARN", "event=portal-circuit status=open action=skip-login")
             if status_callback:
                 await status_callback("🚧 Portal sedang cooldown karena kegagalan berulang. Coba lagi sesaat lagi.")
             clear_context()
-            return self._build_result("circuit_open", message="Portal circuit breaker is open", session_source="HTTP")
+            return self.build_result("circuit_open", message="Portal circuit breaker is open", session_source="HTTP")
 
         for attempt in range(1, max_attempts + 1):
             try:
-                if LoginHandler._public_ip == "N/A":
+                if LoginHandler.cached_public_ip == "N/A":
                     try:
                         # Try ipify first
                         ip_resp = await self.client.get("https://api.ipify.org", timeout=5)
-                        LoginHandler._public_ip = ip_resp.text.strip()
+                        LoginHandler.cached_public_ip = ip_resp.text.strip()
                     except Exception:
                         try:
                             # Fallback if ipify is blocked or down
                             ip_resp = await self.client.get("https://ifconfig.me", timeout=5)
-                            LoginHandler._public_ip = ip_resp.text.strip()
+                            LoginHandler.cached_public_ip = ip_resp.text.strip()
                         except Exception:
                             pass
 
                 perf_start = time.perf_counter()
                 r_init = await self.client.get(login_url)
 
-                if self._is_dashboard_html(r_init.text):
-                    dashboard_ok, dashboard_message = await self._verify_dashboard_session()
+                if self.is_dashboard_html(r_init.text):
+                    dashboard_ok, dashboard_message = await self.verify_dashboard_session()
                     if dashboard_ok:
-                        log("SUCCESS", "event=session_id status=pre_authenticated")
+                        log("SUCCESS", "event=session-id status=pre-authenticated")
                         await portal_circuit_breaker.record_success()
-                        return self._build_result(
+                        return self.build_result(
                             "success",
                             message="Sesi dashboard aktif.",
                             cookies=self.client.cookies.get_dict(),
                             response_time=time.perf_counter() - perf_start,
                             session_source="PERSISTENT",
+                            captcha_code="BYPASSED",
                         )
 
-                if self._is_waf_interstitial(r_init.text):
-                    log("WARN", "event=portal status=waf_interstitial action=browser_bootstrap")
-                    bootstrap_result = await self._bootstrap_portal_session_via_browser(status_callback)
+                if self.is_waf_interstitial(r_init.text):
+                    log("WARN", "event=portal status=waf-interstitial action=browser-bootstrap")
+                    bootstrap_result = await self.bootstrap_portal_session_via_browser(status_callback)
                     if bootstrap_result.get("status") != "success":
                         clear_context()
                         return bootstrap_result
@@ -640,9 +639,9 @@ class LoginHandler:
 
                     r_init = await self.client.get(login_url)
 
-                if not self._is_login_form_ready_html(r_init.text):
-                    log("WARN", "event=login_form status=missing action=emergency_bootstrap")
-                    bootstrap_result = await self._bootstrap_portal_session_via_browser(status_callback)
+                if not self.is_login_form_ready_html(r_init.text):
+                    log("WARN", "event=login-form status=missing action=emergency-bootstrap")
+                    bootstrap_result = await self.bootstrap_portal_session_via_browser(status_callback)
                     if bootstrap_result.get("status") != "success":
                         clear_context()
                         return bootstrap_result
@@ -659,14 +658,14 @@ class LoginHandler:
                     continue
                 tkv = match.group(1)
 
-                image_bytes = await self._fetch_captcha_bytes()
+                image_bytes = await self.fetch_captcha_bytes()
                 if image_bytes is None: continue
                 
-                candidates = await self._get_best_candidates(image_bytes)
+                candidates = await self.get_best_candidates(image_bytes)
                 if not candidates: continue
                 
                 for index, (conf, code, mode) in enumerate(candidates, start=1):
-                    log("INFO", f"event=login_attempt attempt={attempt}.{index} captcha={Fore.YELLOW}{code}")
+                    log("INFO", f"event=login-attempt attempt={attempt}.{index} captcha={Fore.YELLOW}{code}")
                     if status_callback:
                         await status_callback(f"🧩 Memecahkan Captcha: <b>{code}</b>")
 
@@ -697,11 +696,11 @@ class LoginHandler:
                         if res.get("status") == "success":
                             if status_callback:
                                 await status_callback("🏠 Memverifikasi akses dashboard...")
-                            dashboard_ok, dashboard_message = await self._verify_dashboard_session()
+                            dashboard_ok, dashboard_message = await self.verify_dashboard_session()
                             if dashboard_ok:
                                 log("SUCCESS", "event=login status=success dashboard=verified")
                                 await portal_circuit_breaker.record_success()
-                                return self._build_result(
+                                return self.build_result(
                                     "success",
                                     message="Login berhasil.",
                                     cookies=self.client.cookies.get_dict(),
@@ -711,11 +710,8 @@ class LoginHandler:
                                     session_source="HTTP",
                                 )
                             failure_reason = dashboard_message
-                        elif self._message_is_captcha_failure(response_message):
-                            failure_reason = "Captcha portal tidak valid."
-                            continue
-                        elif self._message_is_invalid_credentials(response_message):
-                            return self._build_result(
+                        elif self.message_is_invalid_credentials(response_message):
+                            return self.build_result(
                                 "failed",
                                 message=response_message or "Kredensial salah.",
                                 session_source="HTTP",
@@ -728,18 +724,18 @@ class LoginHandler:
                     except Exception:
                         response_body = r_post.text
                         # 1. Check for WAF challenge
-                        if self._is_waf_interstitial(response_body):
-                            log("WARN", "event=login status=waf_detected_on_post action=emergency_bootstrap")
+                        if self.is_waf_interstitial(response_body):
+                            log("WARN", "event=login status=waf-detected-on-post action=emergency-bootstrap")
                             if status_callback: await status_callback("🛡️ WAF terdeteksi pada POST, memicu bypass...")
-                            await self._bootstrap_portal_session_via_browser(status_callback)
+                            await self.bootstrap_portal_session_via_browser(status_callback)
                             continue 
                         
                         # 2. Check if we were redirected to dashboard (Fallback for non-JSON 302)
-                        dashboard_ok, dashboard_message = await self._verify_dashboard_session()
+                        dashboard_ok, dashboard_message = await self.verify_dashboard_session()
                         if dashboard_ok:
                             log("SUCCESS", "event=login status=success redirect=true dashboard=verified")
                             await portal_circuit_breaker.record_success()
-                            return self._build_result(
+                            return self.build_result(
                                 "success",
                                 message="Login berhasil (Redirect).",
                                 cookies=self.client.cookies.get_dict(),
@@ -750,11 +746,11 @@ class LoginHandler:
                             )
                             
                         # 3. Check for specific text-based errors
-                        if self._message_is_captcha_failure(response_body):
+                        if self.message_is_captcha_failure(response_body):
                             failure_reason = "Captcha portal tidak valid."
                             continue
-                        if self._message_is_invalid_credentials(response_body):
-                            return self._build_result(
+                        if self.message_is_invalid_credentials(response_body):
+                            return self.build_result(
                                 "failed",
                                 message="NIP atau password portal tidak valid.",
                                 session_source="HTTP",
@@ -768,18 +764,18 @@ class LoginHandler:
                 log("ERROR", f"event=login exception={e}")
                 await asyncio.sleep(1)
 
-        return self._build_result(
+        return self.build_result(
             "failed",
             message=failure_reason or "Gagal login setelah beberapa percobaan.",
             session_source="HTTP",
         )
 
-    async def _run_browser_login_fallback(self, username, password, action, location, status_callback, start_time=None):
-        log("STEP", "event=emergency_bridge status=launching")
+    async def run_browser_login_fallback(self, username, password, action, location, status_callback, start_time=None):
+        log("STEP", "event=emergency-bridge status=launching")
         if status_callback:
             await status_callback("🌐 Menjalankan fallback login browser penuh...")
 
-        res_browser = await self._solve_waf_challenge_via_browser(
+        res_browser = await self.solve_waf_challenge_via_browser(
             username=username, password=password, action=action, location=location
         )
         if isinstance(res_browser, dict) and res_browser.get("status") == "success":
@@ -790,7 +786,7 @@ class LoginHandler:
 
             LoginHandler.cache_shared_waf_cookies(cast(list[CookieData] | None, cookies))
             await portal_circuit_breaker.record_success()
-            return self._build_result(
+            return self.build_result(
                 "success",
                 message="Login browser berhasil dan dashboard tervalidasi.",
                 cookies=cookies,
@@ -799,24 +795,24 @@ class LoginHandler:
             )
 
         if isinstance(res_browser, dict):
-            return self._build_result(
+            return self.build_result(
                 str(res_browser.get("status") or "failed"),
                 message=str(res_browser.get("message") or "Browser bridge login failed"),
                 session_source="BRIDGE",
                 failure_stage=cast(str | None, res_browser.get("failure_stage")),
             )
-        return self._build_result(
+        return self.build_result(
             "failed",
             message="Browser bridge login failed",
             session_source="BRIDGE",
             failure_stage="dashboard_unreachable",
         )
 
-    async def _solve_waf_challenge_via_browser(self, username=None, password=None, action=None, location=None, status_callback=None):
+    async def solve_waf_challenge_via_browser(self, username=None, password=None, action=None, location=None, status_callback=None):
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            return self._build_result(
+            return self.build_result(
                 "failed",
                 message="Playwright tidak tersedia di runtime.",
                 session_source="BROWSER",
@@ -851,9 +847,9 @@ class LoginHandler:
 
                 if not username or not password:
                     cookies_list = await context.cookies()
-                    formatted = self._format_cookie_payload(cookies_list)
+                    formatted = self.format_cookie_payload(cookies_list)
                     await browser.close()
-                    return self._build_result(
+                    return self.build_result(
                         "success",
                         message="Form login portal siap.",
                         session_source="BROWSER",
@@ -871,7 +867,7 @@ class LoginHandler:
 
                 for login_attempt in range(1, 6):
                     try:
-                        log("INFO", f"event=waf_browser status=attempt attempt={login_attempt} user={username}")
+                        log("INFO", f"event=waf-browser status=attempt attempt={login_attempt} user={username}")
                         if status_callback:
                             await status_callback(f"🧩 Menyiapkan captcha percobaan {login_attempt}/5...")
                         await page.locator('input[name="username"]').fill(username)
@@ -882,9 +878,9 @@ class LoginHandler:
                         await asyncio.sleep(1)
                         img_bytes = await captcha_img.screenshot()
                         
-                        ocr_candidates = await self._get_best_candidates(img_bytes)
+                        ocr_candidates = await self.get_best_candidates(img_bytes)
                         if not ocr_candidates:
-                            log("WARN", f"event=waf_browser status=ocr_failed attempt={login_attempt}")
+                            log("WARN", f"event=waf-browser status=ocr-failed attempt={login_attempt}")
                             last_failure_stage = "captcha_failed"
                             last_message = "Captcha portal tidak dapat dibaca."
                             await page.click('img[src*="captcha"]')
@@ -892,13 +888,13 @@ class LoginHandler:
                             continue
                         
                         code = ocr_candidates[0][1]
-                        log("INFO", f"event=waf_browser status=captcha_solved code={code} attempt={login_attempt}")
+                        log("INFO", f"event=waf-browser status=captcha-solved code={code} attempt={login_attempt}")
                         
                         await page.locator('input[name="kv-captcha"]').fill("")
                         await page.locator('input[name="kv-captcha"]').fill(code)
                         await page.locator('button[type="submit"]').click(force=True)
 
-                        log("INFO", f"event=waf_browser status=submitted_wait user={username}")
+                        log("INFO", f"event=waf-browser status=submitted-wait user={username}")
                         try:
                             await page.wait_for_load_state("domcontentloaded", timeout=5000)
                         except Exception:
@@ -906,12 +902,12 @@ class LoginHandler:
                         if status_callback:
                             await status_callback("🏠 Memverifikasi akses dashboard...")
 
-                        dashboard_ok, dashboard_message, failure_stage = await self._open_dashboard_in_browser(page)
+                        dashboard_ok, dashboard_message, failure_stage = await self.open_dashboard_in_browser(page)
                         if dashboard_ok:
                             reached_dashboard = True
-                            log("SUCCESS", "event=waf_browser status=dashboard_reached user={username}")
+                            log("SUCCESS", "event=waf-browser status=dashboard-reached user={username}")
                             if action:
-                                attendance_res = await self._perform_attendance_in_browser(page, action, location)
+                                attendance_res = await self.perform_attendance_in_browser(page, action, location)
                             break
                         last_failure_stage = failure_stage
                         last_message = dashboard_message
@@ -920,7 +916,7 @@ class LoginHandler:
 
                         if failure_stage == "invalid_credentials":
                             await browser.close()
-                            return self._build_result(
+                            return self.build_result(
                                 "terminal",
                                 message=dashboard_message,
                                 session_source="BRIDGE",
@@ -934,11 +930,11 @@ class LoginHandler:
                     except Exception as e:
                         last_failure_stage = "dashboard_unreachable"
                         last_message = f"Kesalahan saat login browser: {e}"
-                        log("ERROR", f"event=waf_browser status=attempt_error error={e}")
+                        log("ERROR", f"event=waf-browser status=attempt-error error={e}")
                         await asyncio.sleep(2)
 
                 cookies_list = await context.cookies()
-                formatted = self._format_cookie_payload(cookies_list)
+                formatted = self.format_cookie_payload(cookies_list)
                 
                 if username and reached_dashboard:
                     try:
@@ -954,25 +950,25 @@ class LoginHandler:
                             },
                         )
                     except Exception as e:
-                        log("WARN", f"event=waf_browser status=session_persist_failed error={e}")
+                        log("WARN", f"event=waf-browser status=session-persist-failed error={e}")
                 
                 await browser.close()
                 if reached_dashboard:
-                    return self._build_result(
+                    return self.build_result(
                         "success",
                         message="Login browser berhasil dan dashboard tervalidasi.",
                         session_source="BRIDGE",
                         cookies=formatted,
                         attendance_result=attendance_res,
                     )
-                return self._build_result(
+                return self.build_result(
                     "failed",
                     message=last_message,
                     session_source="BRIDGE",
                     failure_stage=last_failure_stage,
                 )
 
-    async def _perform_attendance_in_browser(self, page, action, location=None):
+    async def perform_attendance_in_browser(self, page, action, location=None):
         try:
             await page.goto(f"{self.base_url}/home/dashboard")
             await page.wait_for_load_state("networkidle")
@@ -990,6 +986,6 @@ class LoginHandler:
             }}).then(res => res.json())
             """
             result = await page.evaluate(script)
-            log("INFO", f"event=browser_attendance status=result data={result}")
+            log("INFO", f"event=browser-attendance status=result data={result}")
             return result.get("status") == "success" or "berhasil" in str(result).lower()
         except Exception: return False

@@ -14,7 +14,7 @@ from star_attendance.database_manager import get_workday_label
 UserPayload = Mapping[str, Any]
 
 
-def _format_coords(user: UserPayload) -> str:
+def format_coords(user: UserPayload) -> str:
     latitude = user.get("latitude")
     longitude = user.get("longitude")
     if not latitude or not longitude:
@@ -25,7 +25,7 @@ def _format_coords(user: UserPayload) -> str:
         return "FORMAT TIDAK VALID"
 
 
-def _format_source(source: str | None) -> str:
+def format_source(source: str | None) -> str:
     mapping = {
         "personal": "PERSONAL",
         "upt": "UPT",
@@ -54,20 +54,20 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
             f"  ├ NIP: <code>{user['nip']}</code>\n"
             f"  ├ TELEGRAM ID: <code>{telegram_id}</code>\n"
             f"  └ UNIT: <code>{user.get('nama_upt', 'CLUSTER DEFAULT')}</code>\n\n"
-            "⏰ <b>JADWAL OPERASIONAL</b>\n"
-            f"  ├ AUTO-MASUK: <code>{user['cron_in']}</code>{in_label}\n"
-            f"  ├ AUTO-PULANG: <code>{user['cron_out']}</code>{out_label}\n"
+            "⏰ <b>JADWAL ABSENSI OTOMATIS</b>\n"
+            f"  ├ JAM MASUK: <code>{user['cron_in']}</code>{in_label}\n"
+            f"  ├ JAM PULANG: <code>{user['cron_out']}</code>{out_label}\n"
             f"  ├ HARI KERJA: <code>{user.get('workdays_label', '-')}</code>\n"
-            f"  ├ STATUS USER: <code>{'AKTIF' if user.get('is_active', True) else 'NONAKTIF'}</code>\n"
-            f"  ├ STATUS AUTO ABSEN: <code>{auto_status}</code>\n"
+            f"  ├ STATUS AKUN: <code>{'AKTIF' if user.get('is_active', True) else 'NONAKTIF'}</code>\n"
+            f"  ├ AUTO ABSEN: <code>{auto_status}</code>\n"
             f"  └ INFO: <code>{user.get('auto_attendance_reason', '-')}</code>\n\n"
             "📍 <b>LOKASI ABSENSI</b>\n"
-            f"  ├ SUMBER: <code>{_format_source(str(user.get('location_source')))}</code>\n"
+            f"  ├ SUMBER: <code>{format_source(str(user.get('location_source')))}</code>\n"
             f"  ├ NAMA LOKASI: <code>{user.get('location_label', user.get('nama_upt', '-'))}</code>\n"
-            f"  └ KOORDINAT: <code>{_format_coords(user)}</code>\n\n"
-            "📊 <b>RINGKASAN AKTIVITAS</b>\n"
-            f"  ├ PRESENSI MASUK: <code>{last_in_str}</code>\n"
-            f"  └ PRESENSI PULANG: <code>{last_out_str}</code>"
+            f"  └ KOORDINAT GPS: <code>{format_coords(user)}</code>\n\n"
+            "📊 <b>RIWAYAT TERAKHIR</b>\n"
+            f"  ├ TERAKHIR MASUK: <code>{last_in_str}</code>\n"
+            f"  └ TERAKHIR PULANG: <code>{last_out_str}</code>"
         )
     else:
         body = "<i>⚠️ Administrator Mode: Session Active</i>"
@@ -92,23 +92,23 @@ def get_global_settings_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🌍 Timezone", callback_data="global_edit_timezone"),
         ],
         [
-            InlineKeyboardButton("🕗 Rule IN", callback_data="global_edit_rule_in_before"),
-            InlineKeyboardButton("🕔 Rule OUT", callback_data="global_edit_rule_out_after"),
+            InlineKeyboardButton("🕗 Batas Masuk", callback_data="global_edit_rule_in_before"),
+            InlineKeyboardButton("🕔 Batas Pulang", callback_data="global_edit_rule_out_after"),
         ],
         [
-            InlineKeyboardButton("🧠 Mode", callback_data="global_edit_rule_mode"),
+            InlineKeyboardButton("🧠 Mode Kerja", callback_data="global_edit_rule_mode"),
             InlineKeyboardButton("⏱ Jam Kerja", callback_data="global_edit_rule_work_hours"),
         ],
         [
-            InlineKeyboardButton("🚀 Cron IN", callback_data="global_edit_cron_in"),
-            InlineKeyboardButton("🏁 Cron OUT", callback_data="global_edit_cron_out"),
+            InlineKeyboardButton("🚀 Jadwal Masuk", callback_data="global_edit_cron_in"),
+            InlineKeyboardButton("🏁 Jadwal Pulang", callback_data="global_edit_cron_out"),
         ],
         [
             InlineKeyboardButton("🗓 Hari Kerja", callback_data="global_edit_default_workdays"),
-            InlineKeyboardButton("🤖 Automation", callback_data="global_edit_automation_enabled"),
+            InlineKeyboardButton("🤖 Otomatisasi", callback_data="global_edit_automation_enabled"),
         ],
         [
-            InlineKeyboardButton("🔎 OCR", callback_data="global_edit_ocr_engine"),
+            InlineKeyboardButton("🔎 Mesin OCR", callback_data="global_edit_ocr_engine"),
         ],
         [get_back_button()],
     ]
@@ -123,15 +123,15 @@ def build_global_settings_message(*, store: Any) -> str:
         f"🧭 <b>Default Latitude:</b> <code>{current.get('default_latitude')}</code>\n"
         f"🗺 <b>Default Longitude:</b> <code>{current.get('default_longitude')}</code>\n"
         f"🌍 <b>Timezone:</b> <code>{current.get('timezone')}</code>\n"
-        f"🕗 <b>Rule IN:</b> <code>{current.get('rule_in_before')}</code>\n"
-        f"🕔 <b>Rule OUT:</b> <code>{current.get('rule_out_after')}</code>\n"
-        f"🧠 <b>Rule Mode:</b> <code>{current.get('rule_mode')}</code>\n"
-        f"⏱ <b>Work Hours:</b> <code>{current.get('rule_work_hours')}</code>\n"
-        f"🚀 <b>Default Cron IN:</b> <code>{current.get('cron_in')}</code>\n"
-        f"🏁 <b>Default Cron OUT:</b> <code>{current.get('cron_out')}</code>\n"
-        f"🗓 <b>Default Workdays:</b> <code>{get_workday_label(current.get('default_workdays'))}</code>\n"
-        f"🤖 <b>Automation:</b> <code>{current.get('automation_enabled')}</code>\n"
-        f"🔎 <b>OCR Engine:</b> <code>{current.get('ocr_engine')}</code>"
+        f"🕗 <b>Batas Awal Masuk:</b> <code>{current.get('rule_in_before')}</code>\n"
+        f"🕔 <b>Batas Awal Pulang:</b> <code>{current.get('rule_out_after')}</code>\n"
+        f"🧠 <b>Mode Kerja:</b> <code>{current.get('rule_mode')}</code>\n"
+        f"⏱ <b>Standar Jam Kerja:</b> <code>{current.get('rule_work_hours')}</code>\n"
+        f"🚀 <b>Jadwal Masuk (Cron):</b> <code>{current.get('cron_in')}</code>\n"
+        f"🏁 <b>Jadwal Pulang (Cron):</b> <code>{current.get('cron_out')}</code>\n"
+        f"🗓 <b>Default Hari Kerja:</b> <code>{get_workday_label(current.get('default_workdays'))}</code>\n"
+        f"🤖 <b>Otomatisasi Sistem:</b> <code>{current.get('automation_enabled')}</code>\n"
+        f"🔎 <b>Mesin OCR:</b> <code>{current.get('ocr_engine')}</code>"
     )
 
 
@@ -180,6 +180,7 @@ def build_user_manage_keyboard(nip: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton("📥 Presensi Masuk", callback_data=f"force_in_{nip}"),
             InlineKeyboardButton("📤 Presensi Pulang", callback_data=f"force_out_{nip}"),
         ],
+        [InlineKeyboardButton("💰 Tunjangan Kinerja", callback_data=f"view_allowance_nip_{nip}")],
         [InlineKeyboardButton("🗑️ Hapus Personel", callback_data=f"edit_del_{nip}")],
         [InlineKeyboardButton("◀️ Kembali ke Daftar", callback_data="view_users_list_0")],
     ]

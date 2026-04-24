@@ -104,7 +104,7 @@ store = get_store()
 
 
 async def post_init(application):
-    logger.info("Starting post_init...")
+    logger.info("Starting post-init...")
 
     # 1. SET BOT IDENTITY & DESCRIPTION (Welcome Splash before Start)
     description = (
@@ -160,7 +160,7 @@ async def post_init(application):
 
         import httpx
 
-        cpu = psutil.cpu_percent()
+        cpu = psutil.cpu_percent(interval=0.1)
         ram = psutil.virtual_memory().percent
         boot_time = psutil.boot_time()
 
@@ -219,7 +219,7 @@ async def post_init(application):
     except Exception as e:
         logger.error(f"Failed in post_init telemetry: {e}", exc_info=True)
 
-    logger.info("post_init completed")
+    logger.info("post-init completed")
 
 
 def main():

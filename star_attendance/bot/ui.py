@@ -60,16 +60,16 @@ async def get_main_menu(telegram_id: int) -> InlineKeyboardMarkup:
     is_adm = is_admin(telegram_id)
     keyboard = [
         [
-            InlineKeyboardButton("👤 PROFIL SAYA", callback_data="view_profile"),
-            InlineKeyboardButton("🔄 REFRESH", callback_data="main_menu"),
+            InlineKeyboardButton("👤 PROFIL & DATA DIRI", callback_data="view_profile"),
+            InlineKeyboardButton("🔄 REFRESH DASHBOARD", callback_data="main_menu"),
         ],
         [
-            InlineKeyboardButton("📜 RIWAYAT", callback_data="view_history"),
-            InlineKeyboardButton("💰 TUNJANGAN", callback_data="view_allowance_menu"),
+            InlineKeyboardButton("📜 RIWAYAT ABSENSI", callback_data="view_history"),
+            InlineKeyboardButton("💰 TUNJANGAN KINERJA", callback_data="view_allowance_menu"),
         ],
         [
-            InlineKeyboardButton("🕹️ ABSEN MANUAL", callback_data="start_manual"),
-            InlineKeyboardButton("⚙️ PENGATURAN", callback_data="start_settings_menu"),
+            InlineKeyboardButton("🕹️ ABSEN SEKARANG", callback_data="start_manual"),
+            InlineKeyboardButton("⚙️ ATUR JAM & LOKASI", callback_data="start_settings_menu"),
         ],
         [
             InlineKeyboardButton("📖 PANDUAN", callback_data="view_help"),
@@ -117,9 +117,9 @@ async def get_main_menu(telegram_id: int) -> InlineKeyboardMarkup:
 
 def get_settings_menu() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("⏰ ATUR JADWAL", callback_data="start_schedule")],
-        [InlineKeyboardButton("🗓 ATUR HARI KERJA", callback_data="start_workdays")],
-        [InlineKeyboardButton("📍 ATUR LOKASI", callback_data="start_location")],
+        [InlineKeyboardButton("⏰ UBAH JADWAL ABSEN", callback_data="start_schedule")],
+        [InlineKeyboardButton("🗓 UBAH HARI KERJA", callback_data="start_workdays")],
+        [InlineKeyboardButton("📍 UBAH LOKASI GPS", callback_data="start_location")],
         [get_back_button()],
     ]
     return InlineKeyboardMarkup(keyboard)

@@ -15,6 +15,7 @@ from star_attendance.core.timeutils import isoformat_local
 from star_attendance.core.utils import (
     error,
     format_user_info,
+    get_action_label,
     info,
     print_sync,
     set_context,
@@ -85,7 +86,7 @@ class AttendanceEngine:
         self.last_response_time = 0.0
         self.active_password = None
         self.csrf_token = None
-        self._accumulated_logs: list[str] = []
+        self.accumulated_logs: list[str] = []
         self.last_session_source = "NEW"
         self.last_attempts = 0
         self.last_captcha = "N/A"
@@ -94,7 +95,7 @@ class AttendanceEngine:
         self.last_user_agent = self.user_agent
         self.last_failure_stage: str | None = None
 
-    def _apply_cookies(self, cookies: Any) -> None:
+    def apply_cookies(self, cookies: Any) -> None:
         if not cookies:
             return
         if isinstance(cookies, Mapping):
@@ -102,8 +103,8 @@ class AttendanceEngine:
             return
         if isinstance(cookies, list):
             # --- "MASTER OF MASTER" INJECTION ---
-            if LoginHandler._waf_cookies and isinstance(LoginHandler._waf_cookies, list):
-                for c in LoginHandler._waf_cookies:
+            if LoginHandler.shared_waf_cookies and isinstance(LoginHandler.shared_waf_cookies, list):
+                for c in LoginHandler.shared_waf_cookies:
                     if not isinstance(c, dict):
                         continue
                     cookie = cast(CookieData, c)
@@ -132,7 +133,7 @@ class AttendanceEngine:
             return
         raise TypeError(f"Unsupported cookie payload type: {type(cookies).__name__}")
 
-    def _resolve_login_failure_message(
+    def resolve_login_failure_message(
         self,
         login_result: Mapping[str, Any] | None,
         *,
@@ -178,7 +179,8 @@ class AttendanceEngine:
                 # Verify if still valid
                 if await self.fetch_user_profile():
                     success(f"Berhasil resume sesi manual for {username}.", scope=self.scope)
-                    self._accumulated_logs = stop_log_collection()
+                    self.last_captcha = "BYPASSED"
+                    self.accumulated_logs = stop_log_collection()
                     return True
                 else:
                     warning("Sesi tersimpan tidak valid atau expired. Mencoba login otomatis...", scope=self.scope)
@@ -203,7 +205,7 @@ class AttendanceEngine:
                 self.last_response_time = login_result.get("response_time", 0.0)
 
                 if "cookies" in login_result:
-                    self._apply_cookies(login_result["cookies"])
+                    self.apply_cookies(login_result["cookies"])
 
                     # Check if attendance was already done via Browser Bridge
                     if login_result.get("attendance_result") is True:
@@ -215,7 +217,7 @@ class AttendanceEngine:
                                 "user_agent": self.user_agent,
                             },
                         )
-                        self._accumulated_logs = stop_log_collection()
+                        self.accumulated_logs = stop_log_collection()
                         return "COMPLETED"
 
                 # Verify after login
@@ -229,7 +231,7 @@ class AttendanceEngine:
                         },
                     )
                     success(f"Login otomatis berhasil ({self.last_response_time:.2f}s).", scope=self.scope)
-                    self._accumulated_logs = stop_log_collection()
+                    self.accumulated_logs = stop_log_collection()
                     return True
                 else:
                     self.last_failure_stage = "dashboard_unreachable"
@@ -243,20 +245,20 @@ class AttendanceEngine:
             elif login_result and login_result.get("status") == "circuit_open":
                 self.last_failure_stage = login_result.get("failure_stage")
                 warning("Portal circuit breaker sedang aktif. Menunda percobaan login.", scope=self.scope)
-                self._accumulated_logs = stop_log_collection()
+                self.accumulated_logs = stop_log_collection()
                 return "CIRCUIT_OPEN"
 
             if login_result:
                 self.last_failure_stage = login_result.get("failure_stage") or self.last_failure_stage
 
-            failure_msg = self._resolve_login_failure_message(login_result)
+            failure_msg = self.resolve_login_failure_message(login_result)
             if login_result and login_result.get("status") == "success":
                 failure_msg = "Dashboard tidak bisa diverifikasi setelah login."
             error(f"Gagal login untuk {username}: {failure_msg}", scope=self.scope)
-            self._accumulated_logs = stop_log_collection()
+            self.accumulated_logs = stop_log_collection()
             return failure_msg
         except Exception as e:
-            self._accumulated_logs = stop_log_collection()
+            self.accumulated_logs = stop_log_collection()
             raise e
 
     async def switch_user(self, nip, password=None):
@@ -273,7 +275,7 @@ class AttendanceEngine:
             if not active_password:
                 msg = f"Password untuk {self.nip} tidak ditemukan (DB/Input)."
                 warning(msg, scope=self.scope)
-                self._accumulated_logs = stop_log_collection()
+                self.accumulated_logs = stop_log_collection()
                 return msg
 
             if user_data:
@@ -298,7 +300,8 @@ class AttendanceEngine:
                         success(f"Berhasil resume sesi manual untuk {self.nip}.", scope=self.scope)
                         self.last_session_source = "MANUAL-SESSION"
                         self.last_waf_status = "BYPASSED"
-                        self._accumulated_logs = stop_log_collection()
+                        self.last_captcha = "BYPASSED"
+                        self.accumulated_logs = stop_log_collection()
                         return True
                     else:
                         warning(
@@ -335,19 +338,19 @@ class AttendanceEngine:
                 if login_result.get("status") == "terminal":
                     msg = login_result.get("message") or "Terminal login failure"
                     error(f"KEGAGALAN TERMINAL: {msg}", scope=self.scope)
-                    self._accumulated_logs = stop_log_collection()
+                    self.accumulated_logs = stop_log_collection()
                     return f"TERMINAL:{msg}"
                 if login_result.get("status") == "circuit_open":
                     warning("Portal circuit breaker sedang aktif. Menunda percobaan login.", scope=self.scope)
-                    self._accumulated_logs = stop_log_collection()
+                    self.accumulated_logs = stop_log_collection()
                     return "CIRCUIT_OPEN"
 
                 if "cookies" in login_result:
                     cookies = login_result["cookies"]
                     if cookies and isinstance(cookies, list):
-                        self._session_source = "BRIDGE"
+                        self.session_source = "BRIDGE"
                         LoginHandler.cache_shared_waf_cookies(cast(list[CookieData], cookies))
-                        for c in LoginHandler._waf_cookies or []:
+                        for c in LoginHandler.shared_waf_cookies or []:
                             if not isinstance(c, dict):
                                 continue
                             cookie = cast(CookieData, c)
@@ -360,7 +363,7 @@ class AttendanceEngine:
                                 )
                             except Exception:
                                 continue
-                    self._apply_cookies(login_result["cookies"])
+                    self.apply_cookies(login_result["cookies"])
 
                     # THE "SUCCESS TOTAL" SHORTCUT
                     if login_result.get("attendance_result") is True:
@@ -376,10 +379,10 @@ class AttendanceEngine:
                             },
                         )
                         success(
-                            f"Absensi {self.action.upper()} diselesaikan via Browser Session (Bypass).",
+                            f"Absensi {get_action_label(self.action)} diselesaikan via Browser Session (Bypass).",
                             scope=self.scope,
                         )
-                        self._accumulated_logs = stop_log_collection()
+                        self.accumulated_logs = stop_log_collection()
                         return "COMPLETED"
 
                 if await self.fetch_user_profile():
@@ -392,18 +395,18 @@ class AttendanceEngine:
                         },
                     )
                     success(f"Login otomatis berhasil ({self.last_response_time:.2f}s).", scope=self.scope)
-                    self._accumulated_logs = stop_log_collection()
+                    self.accumulated_logs = stop_log_collection()
                     return True
                 self.last_failure_stage = "dashboard_unreachable"
 
-            failure_msg = self._resolve_login_failure_message(login_result)
+            failure_msg = self.resolve_login_failure_message(login_result)
             if login_result and login_result.get("status") == "success":
                 failure_msg = "Dashboard tidak bisa diverifikasi setelah login."
             error(f"Gagal login untuk {self.nip}: {failure_msg}", scope=self.scope)
-            self._accumulated_logs = stop_log_collection()
+            self.accumulated_logs = stop_log_collection()
             return failure_msg
         except Exception as e:
-            self._accumulated_logs = stop_log_collection()
+            self.accumulated_logs = stop_log_collection()
             raise e
 
     async def fetch_user_profile(self):
@@ -461,7 +464,7 @@ class AttendanceEngine:
         if not self.user_info.get("nama") or self.user_info["nama"] == "Unknown":
             if not await self.fetch_user_profile():
                 error("Gagal mengambil data profil.", scope=self.scope)
-                self._accumulated_logs = stop_log_collection()
+                self.accumulated_logs = stop_log_collection()
                 return False
 
         if self.status_callback:
@@ -478,13 +481,13 @@ class AttendanceEngine:
             # Re-fetch dashboard or use existing soup to check status
             if self.store.is_mass_stop_requested():
                 warning(f"Stop signal received. Aborting for {self.nip}", scope=self.scope)
-                self._accumulated_logs = stop_log_collection()
+                self.accumulated_logs = stop_log_collection()
                 return False
 
             soup = None
             for attempt in range(2):
                 if self.store.is_mass_stop_requested():
-                    self._accumulated_logs = stop_log_collection()
+                    self.accumulated_logs = stop_log_collection()
                     return False
                 resp = await self.client.get(f"{self.base_url}/home/dashboard")
                 if resp.status_code == 429:
@@ -496,7 +499,7 @@ class AttendanceEngine:
                         continue
                     error("Sesi tidak valid (diarahkan ke login).", scope=self.scope)
                     self.store.add_audit_log(self.nip, self.action, "failed", "Sesi tidak valid (login)")
-                    self._accumulated_logs = stop_log_collection()
+                    self.accumulated_logs = stop_log_collection()
                     return False
                 if resp.status_code >= 500:
                     await asyncio.sleep(1.5)
@@ -506,7 +509,7 @@ class AttendanceEngine:
             if soup is None:
                 error("Gagal memuat dashboard.", scope=self.scope)
                 self.store.add_audit_log(self.nip, self.action, "failed", "Gagal memuat dashboard")
-                self._accumulated_logs = stop_log_collection()
+                self.accumulated_logs = stop_log_collection()
                 return False
 
             # Determine button ID based on action
@@ -525,7 +528,7 @@ class AttendanceEngine:
                     if not await self.fetch_user_profile():
                         error("CSRF Token tidak ditemukan.", scope=self.scope)
                         self.store.add_audit_log(self.nip, self.action, "failed", "CSRF Token tidak ditemukan")
-                        self._accumulated_logs = stop_log_collection()
+                        self.accumulated_logs = stop_log_collection()
                         return False
 
                 payload = {
@@ -555,7 +558,7 @@ class AttendanceEngine:
                 )
 
                 step(
-                    f"Submitting presence ({self.action.upper()}) to {self.base_url}/attendance/presence...",
+                    f"Submitting presence ({get_action_label(self.action)}) to {self.base_url}/attendance/presence...",
                     scope=self.scope,
                 )
 
@@ -615,7 +618,7 @@ class AttendanceEngine:
                             if json_resp and (
                                 json_resp.get("status") == "success" or "berhasil" in str(json_resp).lower()
                             ):
-                                success(f"ABSEN {self.action.upper()} BERHASIL! Resp: {json_resp}", scope=self.scope)
+                                success(f"ABSEN {get_action_label(self.action)} BERHASIL! Resp: {json_resp}", scope=self.scope)
                                 self.store.add_audit_log(
                                     self.nip, self.action, "success", "Berhasil submit absen", presence_response_time
                                 )
@@ -628,8 +631,8 @@ class AttendanceEngine:
                             # Check if HTML response indicates success
                             if "berhasil" in post_resp.text.lower():
                                 # 1. Inject Global WAF context if available
-                                if LoginHandler._waf_cookies and isinstance(LoginHandler._waf_cookies, list):
-                                    for c in LoginHandler._waf_cookies:
+                                if LoginHandler.shared_waf_cookies and isinstance(LoginHandler.shared_waf_cookies, list):
+                                    for c in LoginHandler.shared_waf_cookies:
                                         if not isinstance(c, dict):
                                             continue
                                         cookie = cast(CookieData, c)
@@ -642,7 +645,7 @@ class AttendanceEngine:
                                             )
                                         except Exception:
                                             continue
-                                success(f"ABSEN {self.action.upper()} BERHASIL (HTML Resp)!", scope=self.scope)
+                                success(f"ABSEN {get_action_label(self.action)} BERHASIL (HTML Resp)!", scope=self.scope)
                                 self.store.add_audit_log(
                                     self.nip,
                                     self.action,
@@ -670,8 +673,8 @@ class AttendanceEngine:
             error(f"Exception during execute_attendance: {e}", scope=self.scope)
             traceback.print_exc()
             self.store.add_audit_log(self.nip, self.action, "failed", f"Exception: {str(e)}")
-            self._accumulated_logs = stop_log_collection()
+            self.accumulated_logs = stop_log_collection()
             return False
 
-        self._accumulated_logs = stop_log_collection()
+        self.accumulated_logs = stop_log_collection()
         return result

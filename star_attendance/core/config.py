@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     PORTAL_CIRCUIT_BREAKER_COOLDOWN_SECONDS: int = 90
 
     # --- API CONFIGURATION ---
-    INTERNAL_API_URL: str = "http://127.0.0.1:8000"
+    INTERNAL_API_URL: str = "http://127.0.0.1:11800"
     INTERNAL_API_TOKEN: str | None = None
 
     # --- BROWSER SETTINGS ---

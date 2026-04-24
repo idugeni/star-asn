@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from star_attendance.bot.constants import WAIT_MAN_ACTION
 from star_attendance.core.options import RuntimeOptions
 from star_attendance.core.processor import process_single_user
+from star_attendance.core.utils import get_action_label
 
 from .conversation_shared import get_user_id, store
 
@@ -26,8 +27,8 @@ async def start_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return ConversationHandler.END
 
     keyboard = [
-        [InlineKeyboardButton("✅ ABSEN IN SEKARANG", callback_data="man_do_in")],
-        [InlineKeyboardButton("🏠 ABSEN OUT SEKARANG", callback_data="man_do_out")],
+        [InlineKeyboardButton("✅ ABSEN MASUK SEKARANG", callback_data="man_do_in")],
+        [InlineKeyboardButton("🏠 ABSEN PULANG SEKARANG", callback_data="man_do_out")],
         [InlineKeyboardButton("❌ BATAL", callback_data="man_cancel")],
     ]
     if isinstance(query.message, Message):
@@ -58,12 +59,12 @@ async def man_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
 
     await query.message.edit_text(
-        f"<b>🤖 OTOMASI {action.upper()}</b>\n────────────────\n⏳ Mengeksekusi manual {action.upper()}...",
+        f"<b>🤖 OTOMASI {get_action_label(action)}</b>\n────────────────\n⏳ Mengeksekusi manual {get_action_label(action)}...",
         parse_mode="HTML",
     )
     status_message = query.message
     msg_id_container = {"id": status_message.message_id}
-    last_status = [f"⏳ Mengeksekusi manual {action.upper()}..."]
+    last_status = [f"⏳ Mengeksekusi manual {get_action_label(action)}..."]
 
     async def progress_callback(text: str) -> None:
         if text == last_status[0]:
@@ -71,7 +72,7 @@ async def man_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         last_status[0] = text
         try:
             await status_message.edit_text(
-                f"<b>🤖 OTOMASI {action.upper()}</b>\n────────────────\n🔄 {text}",
+                f"<b>🤖 OTOMASI {get_action_label(action)}</b>\n────────────────\n🔄 {text}",
                 parse_mode="HTML",
             )
         except Exception:

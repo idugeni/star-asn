@@ -31,23 +31,23 @@ from .conversation_shared import (
     get_user_id,
 )
 from .conversation_shared import (
-    parse_bool as _parse_bool,
+    parse_bool,
 )
 from .conversation_shared import (
-    parse_workdays as _parse_workdays,
+    parse_workdays,
 )
 from .conversation_shared import (
-    validate_global_setting as _validate_global_setting,
+    validate_global_setting,
 )
 from .conversation_shared import (
-    validate_time_text as _validate_time_text,
+    validate_time_text,
 )
 
 __all__ = [
-    "_parse_bool",
-    "_parse_workdays",
-    "_validate_time_text",
-    "_validate_global_setting",
+    "parse_bool",
+    "parse_workdays",
+    "validate_time_text",
+    "validate_global_setting",
     "admin_add_name",
     "admin_add_nip",
     "admin_add_pass",

@@ -32,7 +32,7 @@ docker compose up --watch
 - `/opt/venv` already configured
 - Ruff, mypy, pytest pre-installed
 - All dependencies matching production
-- Port 8000 auto-forwarded to localhost
+- Port 11800 auto-forwarded to localhost
 
 **Inside Dev Container:**
 ```bash
@@ -98,8 +98,8 @@ VS Code → F1 → "Dev Containers: Reopen in Container"
 - Check `.devcontainer/devcontainer.json` syntax: `cat .devcontainer/devcontainer.json | jq`
 
 **Port already in use?**
-- `lsof -i :8000` (macOS/Linux)
-- `netstat -ano | findstr :8000` (Windows)
+- `lsof -i :11800` (macOS/Linux)
+- `netstat -ano | findstr :11800` (Windows)
 
 ---
 

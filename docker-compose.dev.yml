@@ -53,11 +53,11 @@ services:
     container_name: star-asn-api-dev
     environment:
       <<: *star-asn-runtime-env
-      INTERNAL_API_URL: http://api:8000
-      INTERNAL_API_HEALTHCHECK_URL: http://127.0.0.1:8000
+      INTERNAL_API_URL: http://api:11800
+      INTERNAL_API_HEALTHCHECK_URL: http://127.0.0.1:11800
       LOG_LEVEL: DEBUG
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:11800:11800"
     command: ["api"]
     deploy:
       restart_policy:
@@ -82,7 +82,7 @@ services:
     container_name: star-asn-worker-dev
     environment:
       <<: *star-asn-runtime-env
-      INTERNAL_API_URL: http://api:8000
+      INTERNAL_API_URL: http://api:11800
       LOG_LEVEL: DEBUG
     command: ["worker"]
     deploy:
@@ -103,7 +103,7 @@ services:
     container_name: star-asn-bot-dev
     environment:
       <<: *star-asn-runtime-env
-      INTERNAL_API_URL: http://api:8000
+      INTERNAL_API_URL: http://api:11800
       LOG_LEVEL: DEBUG
     command: ["bot"]
     deploy:

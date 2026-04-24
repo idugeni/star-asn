@@ -17,6 +17,7 @@ from star_attendance.bot.constants import (
     WAIT_ADMIN_INPUT_VAL,
 )
 from star_attendance.runtime import get_internal_api_client
+from star_attendance.core.utils import get_action_label
 
 from .conversation_shared import GLOBAL_SETTING_LABELS, store, validate_global_setting, validate_nip
 from .handler_views import (
@@ -112,7 +113,7 @@ async def admin_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "workdays": "HARI KERJA (Preset)",
     }
 
-    prompt = f"🛠 <b>UPDATE {field_map.get(action, action.upper())}</b>\n────────────────\n"
+    prompt = f"🛠 <b>UPDATE {field_map.get(action, get_action_label(action))}</b>\n────────────────\n"
     keyboard = None
 
     if action == "loc":

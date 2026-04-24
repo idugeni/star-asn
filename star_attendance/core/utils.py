@@ -15,8 +15,8 @@ from star_attendance.core.timeutils import format_log_timestamp
 # RLock keeps those nested calls from deadlocking.
 print_lock = threading.RLock()
 # Use ContextVar instead of threading.local for asyncio compatibility
-_worker_context: ContextVar[str] = ContextVar("worker_context", default="")
-_log_collector: ContextVar[list[str] | None] = ContextVar("log_collector", default=None)
+worker_context: ContextVar[str] = ContextVar("worker_context", default="")
+log_collector: ContextVar[list[str] | None] = ContextVar("log_collector", default=None)
 TELEGRAM_LOG_SCOPE_BLOCKLIST = frozenset({"AUTH"})
 
 
@@ -29,10 +29,10 @@ class LogBroadcastManager:
 
     def __init__(self):
         self.queue = queue.Queue(maxsize=1000)
-        self.worker_thread = threading.Thread(target=self._worker, daemon=True)
+        self.worker_thread = threading.Thread(target=self.worker, daemon=True)
         self.worker_thread.start()
 
-    def _worker(self):
+    def worker(self):
         try:
             # Lazy import to avoid circular dependency
             from star_attendance.db.manager import db_manager
@@ -75,7 +75,7 @@ class LogBroadcastManager:
 
     def broadcast(self, level, message, scope, timestamp):
         # If a collector is active, collect the log
-        collector = _log_collector.get()
+        collector = log_collector.get()
         if collector is not None and level in {"ERROR", "WARN", "SUCCESS"}:
             collector.append(f"[{timestamp}] {level}: {message}")
             # We still want to broadcast to DB, but skip Telegram individual messages
@@ -119,25 +119,25 @@ def should_broadcast_to_telegram(*, level: str, scope: str, skip_telegram: bool 
 
 
 def set_context(context):
-    _worker_context.set(str(context))
+    worker_context.set(str(context))
 
 
 def clear_context():
-    _worker_context.set("")
+    worker_context.set("")
 
 
-def start_log_collection():
-    _log_collector.set([])
+def start_log_collection() -> None:
+    log_collector.set([])
 
 
 def stop_log_collection() -> list[str]:
-    logs = _log_collector.get() or []
-    _log_collector.set(None)
+    logs = log_collector.get() or []
+    log_collector.set(None)
     return logs
 
 
 def get_context_prefix():
-    ctx = _worker_context.get()
+    ctx = worker_context.get()
     return f"ctx={ctx} " if ctx else ""
 
 
@@ -216,3 +216,12 @@ def format_user_info(name, nip, upt, location):
         f" {Fore.WHITE} | {Fore.WHITE}GPS       : {Fore.BLUE}{location:<46}{Fore.WHITE} |{Style.RESET_ALL}\n"
         f" {Fore.WHITE} +------------------------------------------------------------+{Style.RESET_ALL}"
     )
+
+
+def get_action_label(action: str) -> str:
+    normalized = str(action).lower()
+    if normalized == "in":
+        return "MASUK"
+    if normalized == "out":
+        return "PULANG"
+    return str(action).upper()

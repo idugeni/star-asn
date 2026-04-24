@@ -12,6 +12,7 @@ from star_attendance.core.engine import AttendanceEngine
 from star_attendance.core.utils import (
     clear_context,
     format_user_info,
+    get_action_label,
     info_with_header,
     log,
     print_sync,
@@ -31,7 +32,7 @@ LOGIN_FAILURE_STAGE_MESSAGES = {
 }
 
 
-def _safe_last_success_record(store: Any, nip: str, action: str) -> tuple[Any | None, str | None]:
+def safe_last_success_record(store: Any, nip: str, action: str) -> tuple[Any | None, str | None]:
     record = store.get_last_success_action(nip, action)
     if isinstance(record, tuple):
         if len(record) >= 2:
@@ -41,7 +42,7 @@ def _safe_last_success_record(store: Any, nip: str, action: str) -> tuple[Any | 
     return None, None
 
 
-def _resolve_login_error(login_result: Any) -> str:
+def resolve_login_error(login_result: Any) -> str:
     if isinstance(login_result, Mapping):
         if login_result.get("status") == "success":
             return "Dashboard tidak bisa diverifikasi setelah login."
@@ -110,9 +111,9 @@ async def process_single_user(
     try:
         if store.has_successful_attendance_today(nip, action):
             from star_attendance.core.timeutils import format_precise_time
-            recorded_at, _ = _safe_last_success_record(store, nip, action)
+            recorded_at, _ = safe_last_success_record(store, nip, action)
             time_str = format_precise_time(recorded_at)
-            label = "Presensi Masuk" if action.lower() == "in" else "Presensi Pulang"
+            label = get_action_label(action)
             
             store.add_audit_log(nip, action, "skipped", f"Attendance {label} already recorded successfully today.")
 
@@ -192,7 +193,7 @@ async def process_single_user(
                     else:
                         last_error = str(last_error) if last_error else "Attendance submission failed"
                 else:
-                    last_error = _resolve_login_error(login_res)
+                    last_error = resolve_login_error(login_res)
 
                     store.add_audit_log(nip, action, "failed", last_error)
                     result = False
@@ -221,7 +222,7 @@ async def process_single_user(
         actual_name = str(engine.user_info.get("nama") or actual_name)
         recorded_at = None
         if result:
-            recorded_at, _ = _safe_last_success_record(store, nip, action)
+            recorded_at, _ = safe_last_success_record(store, nip, action)
 
         debug_data = {
             "action": action,
@@ -238,7 +239,7 @@ async def process_single_user(
             "event_time": recorded_at,
             "detail": str(last_error) if not result else None,
             "telegram_id": user_chat_id,
-            "logs": getattr(engine, "_accumulated_logs", []),
+            "logs": getattr(engine, "accumulated_logs", []),
         }
 
         full_msg = notifier.format_attendance_msg(

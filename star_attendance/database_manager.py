@@ -78,7 +78,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 
-def _coerce_bool(value: Any, default: bool) -> bool:
+def coerce_bool(value: Any, default: bool) -> bool:
     if value is None:
         return default
     if isinstance(value, bool):
@@ -93,7 +93,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     return default
 
 
-def _coerce_float(value: Any, default: float) -> float:
+def coerce_float(value: Any, default: float) -> float:
     if value is None or value == "":
         return default
     try:
@@ -102,7 +102,7 @@ def _coerce_float(value: Any, default: float) -> float:
         return default
 
 
-def _coerce_optional_float(value: Any) -> float | None:
+def coerce_optional_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     try:
@@ -111,7 +111,7 @@ def _coerce_optional_float(value: Any) -> float | None:
         return None
 
 
-def _coerce_optional_date(value: Any) -> date | None:
+def coerce_optional_date(value: Any) -> date | None:
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
@@ -124,7 +124,7 @@ def _coerce_optional_date(value: Any) -> date | None:
         return None
 
 
-def _infer_allowance_year(period_code: str, data: list[dict[str, Any]]) -> int:
+def infer_allowance_year(period_code: str, data: list[dict[str, Any]]) -> int:
     if data:
         date_str = str(data[0].get("date") or "").strip()
         try:
@@ -141,7 +141,7 @@ def _infer_allowance_year(period_code: str, data: list[dict[str, Any]]) -> int:
     return local_date().year
 
 
-def _stringify_setting(value: Any) -> str:
+def stringify_setting(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if value is None:
@@ -149,7 +149,7 @@ def _stringify_setting(value: Any) -> str:
     return str(value)
 
 
-def _coerce_telegram_id(value: Any) -> int | None:
+def coerce_telegram_id(value: Any) -> int | None:
     if value in (None, ""):
         return None
     if isinstance(value, bool):
@@ -162,15 +162,15 @@ def _coerce_telegram_id(value: Any) -> int | None:
         except ValueError:
             return None
     if isinstance(value, dict) and "id" in value:
-        return _coerce_telegram_id(value["id"])
+        return coerce_telegram_id(value["id"])
     return None
 
 
-def _normalize_time_value(value: Any, fallback: str) -> str:
+def normalize_time_value(value: Any, fallback: str) -> str:
     raw = str(value).strip() if value not in (None, "") else ""
     if not raw or raw.lower() in {"none", "null", "default", "-"}:
         return fallback
-    return raw if _is_valid_time_text(raw) else fallback
+    return raw if is_valid_time_text(raw) else fallback
 
 
 def normalize_workdays(value: Any, default: str = DEFAULT_WORKDAYS) -> str:
@@ -192,7 +192,7 @@ def get_workday_cron(value: Any) -> str:
     return WORKDAY_PRESETS.get(key, WORKDAY_PRESETS[DEFAULT_WORKDAYS])["cron"]
 
 
-def _normalize_audit_action(value: str | AuditAction) -> str:
+def normalize_audit_action(value: str | AuditAction) -> str:
     raw_value = value.value if isinstance(value, AuditAction) else str(value).strip()
     try:
         return AuditAction(raw_value).value
@@ -200,7 +200,7 @@ def _normalize_audit_action(value: str | AuditAction) -> str:
         raise ValueError(f"Unsupported audit action: {value}") from exc
 
 
-def _normalize_audit_status(value: str | AuditStatus) -> str:
+def normalize_audit_status(value: str | AuditStatus) -> str:
     raw_value = value.value if isinstance(value, AuditStatus) else str(value).strip()
     try:
         return AuditStatus(raw_value).value
@@ -208,7 +208,7 @@ def _normalize_audit_status(value: str | AuditStatus) -> str:
         raise ValueError(f"Unsupported audit status: {value}") from exc
 
 
-def _is_valid_time_text(value: str) -> bool:
+def is_valid_time_text(value: str) -> bool:
     parts = value.split(":")
     if len(parts) != 2:
         return False
@@ -220,7 +220,7 @@ def _is_valid_time_text(value: str) -> bool:
     return 0 <= hour <= 23 and 0 <= minute <= 59
 
 
-def _resolve_auto_attendance_status(
+def resolve_auto_attendance_status(
     *,
     automation_enabled: bool,
     is_active: bool,
@@ -236,7 +236,7 @@ def _resolve_auto_attendance_status(
         return False, "User dinonaktifkan."
     if not has_password:
         return False, "Password portal belum tersedia."
-    if not _is_valid_time_text(cron_in) or not _is_valid_time_text(cron_out):
+    if not is_valid_time_text(cron_in) or not is_valid_time_text(cron_out):
         return False, "Jadwal otomatis belum valid."
     if latitude is None or longitude is None:
         return False, "Koordinat belum lengkap."
@@ -250,44 +250,44 @@ class SupabaseManager:
     controls such as idempotency locks and dead-letter recording.
     """
 
-    _cache_lock = threading.RLock()
-    _settings_cache: tuple[float, dict[str, Any]] | None = None
-    _user_cache: dict[str, tuple[float, UserData]] = {}
-    _users_with_passwords_cache: tuple[float, list[UserData]] | None = None
-    _user_summaries_cache: tuple[float, list[UserData]] | None = None
+    cache_lock = threading.RLock()
+    settings_cache: tuple[float, dict[str, Any]] | None = None
+    user_cache: dict[str, tuple[float, UserData]] = {}
+    users_with_passwords_cache: tuple[float, list[UserData]] | None = None
+    user_summaries_cache: tuple[float, list[UserData]] | None = None
 
     def __init__(self) -> None:
         pass
 
     @staticmethod
-    def _now_monotonic() -> float:
+    def now_monotonic() -> float:
         return time.monotonic()
 
-    def _is_cache_valid(self, timestamp: float, ttl_seconds: int) -> bool:
-        return (self._now_monotonic() - timestamp) < ttl_seconds
+    def is_cache_valid(self, timestamp: float, ttl_seconds: int) -> bool:
+        return (self.now_monotonic() - timestamp) < ttl_seconds
 
-    def _invalidate_settings_cache(self) -> None:
-        with self._cache_lock:
-            self.__class__._settings_cache = None
+    def invalidate_settings_cache(self) -> None:
+        with self.cache_lock:
+            self.__class__.settings_cache = None
 
     def invalidate_all_caches(self) -> None:
         """Forcibly clear all internal caches for real-time synchronization."""
-        with self._cache_lock:
-            self.__class__._settings_cache = None
-            self.__class__._user_cache.clear()
-            self.__class__._users_with_passwords_cache = None
-            self.__class__._user_summaries_cache = None
+        with self.cache_lock:
+            self.__class__.settings_cache = None
+            self.__class__.user_cache.clear()
+            self.__class__.users_with_passwords_cache = None
+            self.__class__.user_summaries_cache = None
 
-    def _invalidate_user_cache(self, nip: str | None = None) -> None:
-        with self._cache_lock:
+    def invalidate_user_cache(self, nip: str | None = None) -> None:
+        with self.cache_lock:
             if nip:
-                self.__class__._user_cache.pop(nip, None)
+                self.__class__.user_cache.pop(nip, None)
             else:
-                self.__class__._user_cache.clear()
-            self.__class__._users_with_passwords_cache = None
-            self.__class__._user_summaries_cache = None
+                self.__class__.user_cache.clear()
+            self.__class__.users_with_passwords_cache = None
+            self.__class__.user_summaries_cache = None
 
-    def _decrypt_password(self, raw_password: str | None) -> str | None:
+    def decrypt_password(self, raw_password: str | None) -> str | None:
         if raw_password and raw_password.startswith("gAAAA"):
             try:
                 return security_manager.decrypt_password(raw_password)
@@ -295,7 +295,7 @@ class SupabaseManager:
                 return raw_password
         return raw_password
 
-    def _encrypt_password(self, raw_password: str | None) -> str | None:
+    def encrypt_password(self, raw_password: str | None) -> str | None:
         if raw_password is None:
             return None
         password = str(raw_password)
@@ -305,7 +305,7 @@ class SupabaseManager:
             return password
         return security_manager.encrypt_password(password)
 
-    def _resolve_upt_id(self, session: Any, upt_input: Any) -> str | None:
+    def resolve_upt_id(self, session: Any, upt_input: Any) -> str | None:
         if not upt_input:
             return None
         try:
@@ -319,15 +319,15 @@ class SupabaseManager:
             session.flush()
             return str(new_upt.id)
 
-    def _merge_settings(self, raw_values: dict[str, Any]) -> dict[str, Any]:
+    def merge_settings(self, raw_values: dict[str, Any]) -> dict[str, Any]:
         merged = dict(DEFAULT_SETTINGS)
         merged.update(raw_values)
         merged["default_location"] = str(merged.get("default_location") or DEFAULT_SETTINGS["default_location"])
-        merged["default_latitude"] = _coerce_float(
+        merged["default_latitude"] = coerce_float(
             merged.get("default_latitude"),
             DEFAULT_SETTINGS["default_latitude"],
         )
-        merged["default_longitude"] = _coerce_float(
+        merged["default_longitude"] = coerce_float(
             merged.get("default_longitude"),
             DEFAULT_SETTINGS["default_longitude"],
         )
@@ -339,21 +339,21 @@ class SupabaseManager:
             merged.get("default_workdays"),
             DEFAULT_WORKDAYS,
         )
-        merged["automation_enabled"] = _coerce_bool(
+        merged["automation_enabled"] = coerce_bool(
             merged.get("automation_enabled"),
             bool(DEFAULT_SETTINGS["automation_enabled"]),
         )
         return merged
 
-    def _serialize_user(self, user: Any, db_settings: dict[str, Any] | None = None) -> UserData:
+    def serialize_user(self, user: Any, db_settings: dict[str, Any] | None = None) -> UserData:
         effective_settings = db_settings or self.get_settings()
         upt = getattr(user, "upt", None)
         personal_latitude = getattr(user, "personal_latitude", None)
         personal_longitude = getattr(user, "personal_longitude", None)
         raw_password = cast(str | None, getattr(user, "password", None))
-        decrypted_password = self._decrypt_password(raw_password)
-        default_latitude = _coerce_optional_float(effective_settings.get("default_latitude"))
-        default_longitude = _coerce_optional_float(effective_settings.get("default_longitude"))
+        decrypted_password = self.decrypt_password(raw_password)
+        default_latitude = coerce_optional_float(effective_settings.get("default_latitude"))
+        default_longitude = coerce_optional_float(effective_settings.get("default_longitude"))
 
         if personal_latitude is not None and personal_longitude is not None:
             latitude = float(personal_latitude)
@@ -369,12 +369,12 @@ class SupabaseManager:
         raw_cron_in = getattr(user, "cron_in", None)
         raw_cron_out = getattr(user, "cron_out", None)
         raw_workdays = getattr(user, "workdays", None)
-        cron_in = _normalize_time_value(raw_cron_in, str(effective_settings["cron_in"]))
-        cron_out = _normalize_time_value(raw_cron_out, str(effective_settings["cron_out"]))
+        cron_in = normalize_time_value(raw_cron_in, str(effective_settings["cron_in"]))
+        cron_out = normalize_time_value(raw_cron_out, str(effective_settings["cron_out"]))
         workdays = normalize_workdays(raw_workdays, str(effective_settings["default_workdays"]))
         has_password = bool(decrypted_password)
         is_active = bool(getattr(user, "is_active", True))
-        auto_attendance_active, auto_attendance_reason = _resolve_auto_attendance_status(
+        auto_attendance_active, auto_attendance_reason = resolve_auto_attendance_status(
             automation_enabled=bool(effective_settings.get("automation_enabled", True)),
             is_active=is_active,
             has_password=has_password,
@@ -391,13 +391,13 @@ class SupabaseManager:
             "longitude": longitude,
             "location_label": location_label,
             "location_source": location_source,
-            "telegram_id": _coerce_telegram_id(getattr(user, "telegram_id", None)),
+            "telegram_id": coerce_telegram_id(getattr(user, "telegram_id", None)),
             "password": decrypted_password,
             "has_password": has_password,
             "cron_in": cron_in,
             "cron_out": cron_out,
-            "cron_in_source": "personal" if _is_valid_time_text(str(raw_cron_in).strip()) else "default",
-            "cron_out_source": "personal" if _is_valid_time_text(str(raw_cron_out).strip()) else "default",
+            "cron_in_source": "personal" if is_valid_time_text(str(raw_cron_in).strip()) else "default",
+            "cron_out_source": "personal" if is_valid_time_text(str(raw_cron_out).strip()) else "default",
             "workdays": workdays,
             "workdays_label": get_workday_label(workdays),
             "workdays_source": "personal" if raw_workdays not in (None, "") else "default",
@@ -413,9 +413,9 @@ class SupabaseManager:
         return self.get_user_data(nip)
 
     def get_user_data(self, nip: str) -> UserData | None:
-        with self._cache_lock:
-            cached = self.__class__._user_cache.get(nip)
-            if cached and self._is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
+        with self.cache_lock:
+            cached = self.__class__.user_cache.get(nip)
+            if cached and self.is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
                 return cast(UserData, dict(cached[1]))
 
         db_settings = self.get_settings()
@@ -424,24 +424,24 @@ class SupabaseManager:
             if not user:
                 return None
 
-            serialized = self._serialize_user(user, db_settings=db_settings)
-            with self._cache_lock:
-                self.__class__._user_cache[nip] = (self._now_monotonic(), serialized)
+            serialized = self.serialize_user(user, db_settings=db_settings)
+            with self.cache_lock:
+                self.__class__.user_cache[nip] = (self.now_monotonic(), serialized)
             return cast(UserData, dict(serialized))
 
     def get_user_summaries(self) -> list[UserData]:
-        with self._cache_lock:
-            cached = self.__class__._user_summaries_cache
-            if cached and self._is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
+        with self.cache_lock:
+            cached = self.__class__.user_summaries_cache
+            if cached and self.is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
                 return [cast(UserData, dict(item)) for item in cached[1]]
 
         db_settings = self.get_settings()
         with db_manager.get_session() as session:
             users = session.query(User).options(joinedload(User.upt)).order_by(User.nama.asc()).all()
-            summaries = [self._serialize_user(user, db_settings=db_settings) for user in users]
+            summaries = [self.serialize_user(user, db_settings=db_settings) for user in users]
 
-        with self._cache_lock:
-            self.__class__._user_summaries_cache = (self._now_monotonic(), summaries)
+        with self.cache_lock:
+            self.__class__.user_summaries_cache = (self.now_monotonic(), summaries)
         return [cast(UserData, dict(item)) for item in summaries]
 
     def get_user_by_telegram_id(self, tid: int) -> UserData | None:
@@ -471,15 +471,15 @@ class SupabaseManager:
 
         db_settings = self.get_settings()
         with db_manager.get_session() as session:
-            actual_upt_id = self._resolve_upt_id(session, data.get("upt_id"))
-            encrypted_password = self._encrypt_password(data.get("password"))
+            actual_upt_id = self.resolve_upt_id(session, data.get("upt_id"))
+            encrypted_password = self.encrypt_password(data.get("password"))
 
             existing_user = session.query(User).filter(User.nip == nip).first()
             if existing_user:
                 # Protection: Don't allow a new telegram_id to overwrite an EXISTING different telegram_id
                 # unless the update is coming from an admin (where we might just be updating fields)
                 # or the NIP didn't have a telegram_id yet (e.g., added by admin manually).
-                new_tid = _coerce_telegram_id(data.get("telegram_id"))
+                new_tid = coerce_telegram_id(data.get("telegram_id"))
                 if existing_user.telegram_id and new_tid and existing_user.telegram_id != new_tid:
                     # NIP is already linked to someone else.
                     return False
@@ -508,7 +508,7 @@ class SupabaseManager:
                         nama=data.get("nama", ""),
                         password=encrypted_password or None,
                         upt_id=actual_upt_id,
-                        telegram_id=_coerce_telegram_id(data.get("telegram_id")),
+                        telegram_id=coerce_telegram_id(data.get("telegram_id")),
                         role=data.get("role", "user"),
                         is_admin=bool(data.get("is_admin", False)),
                         is_active=bool(data.get("is_active", True)),
@@ -520,7 +520,7 @@ class SupabaseManager:
                     )
                 )
 
-        self._invalidate_user_cache(str(nip))
+        self.invalidate_user_cache(str(nip))
         self.add_audit_log(
             nip=str(nip),
             action="registration",
@@ -544,9 +544,9 @@ class SupabaseManager:
                 normalized = str(value).strip() if value not in (None, "") else ""
                 user.cron_out = normalized if normalized.lower() not in {"none", "null", "default", "-"} else None
             if "personal_latitude" in settings_update:
-                user.personal_latitude = _coerce_optional_float(settings_update["personal_latitude"])
+                user.personal_latitude = coerce_optional_float(settings_update["personal_latitude"])
             if "personal_longitude" in settings_update:
-                user.personal_longitude = _coerce_optional_float(settings_update["personal_longitude"])
+                user.personal_longitude = coerce_optional_float(settings_update["personal_longitude"])
             if "workdays" in settings_update:
                 value = settings_update["workdays"]
                 user.workdays = normalize_workdays(value) if value not in (None, "") else None
@@ -555,16 +555,16 @@ class SupabaseManager:
             if "nama" in settings_update:
                 user.nama = str(settings_update["nama"])
             if "password" in settings_update:
-                encrypted_password = self._encrypt_password(settings_update["password"])
+                encrypted_password = self.encrypt_password(settings_update["password"])
                 if encrypted_password is not None:
                     user.password = encrypted_password
 
             if "upt_id" in settings_update:
-                user.upt_id = self._resolve_upt_id(session, settings_update["upt_id"])
+                user.upt_id = self.resolve_upt_id(session, settings_update["upt_id"])
 
             session.add(user)
 
-        self._invalidate_user_cache(nip)
+        self.invalidate_user_cache(nip)
         self.add_audit_log(
             nip=nip,
             action="settings_update",
@@ -606,7 +606,7 @@ class SupabaseManager:
                 text("UPDATE public.attendance_dead_letters SET nip = :new_nip WHERE nip = :old_nip"),
                 {"old_nip": old_nip, "new_nip": new_nip},
             )
-            self._add_audit_log_entry(
+            self.add_audit_log_entry(
                 session,
                 nip=new_nip,
                 action=AuditAction.rename_nip,
@@ -615,13 +615,13 @@ class SupabaseManager:
                 user_id=user_id,
             )
 
-        self._invalidate_user_cache()
+        self.invalidate_user_cache()
         return True
 
     def get_users_with_passwords(self) -> list[UserData]:
-        with self._cache_lock:
-            cached = self.__class__._users_with_passwords_cache
-            if cached and self._is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
+        with self.cache_lock:
+            cached = self.__class__.users_with_passwords_cache
+            if cached and self.is_cache_valid(cached[0], settings.USER_CACHE_TTL_SECONDS):
                 return [cast(UserData, dict(item)) for item in cached[1]]
 
         db_settings = self.get_settings()
@@ -633,10 +633,10 @@ class SupabaseManager:
                 .order_by(User.nama.asc())
                 .all()
             )
-            results = [self._serialize_user(user, db_settings=db_settings) for user in users]
+            results = [self.serialize_user(user, db_settings=db_settings) for user in users]
 
-        with self._cache_lock:
-            self.__class__._users_with_passwords_cache = (self._now_monotonic(), results)
+        with self.cache_lock:
+            self.__class__.users_with_passwords_cache = (self.now_monotonic(), results)
         return [cast(UserData, dict(item)) for item in results]
 
     def delete_user(self, nip: str) -> bool:
@@ -646,7 +646,7 @@ class SupabaseManager:
             session.query(UserSession).filter(UserSession.nip == nip).delete()
             deleted = session.query(User).filter(User.nip == nip).delete() > 0
 
-        self._invalidate_user_cache(nip)
+        self.invalidate_user_cache(nip)
         if deleted:
             self.add_audit_log(
                 nip=nip,
@@ -708,7 +708,7 @@ class SupabaseManager:
         response_time: float | None = None,
     ) -> None:
         with db_manager.get_session() as session:
-            self._add_audit_log_entry(
+            self.add_audit_log_entry(
                 session,
                 nip=nip,
                 action=action,
@@ -717,7 +717,7 @@ class SupabaseManager:
                 response_time=response_time,
             )
 
-    def _add_audit_log_entry(
+    def add_audit_log_entry(
         self,
         session: Any,
         *,
@@ -729,8 +729,8 @@ class SupabaseManager:
         user_id: Any | None = None,
     ) -> None:
         normalized_nip = str(nip)
-        normalized_action = _normalize_audit_action(action)
-        normalized_status = _normalize_audit_status(status)
+        normalized_action = normalize_audit_action(action)
+        normalized_status = normalize_audit_status(status)
         resolved_user_id = user_id
         if resolved_user_id is None:
             user = session.query(User).filter(User.nip == normalized_nip).first()
@@ -1168,24 +1168,24 @@ class SupabaseManager:
     # --- GLOBAL SETTINGS ---
 
     def get_settings(self) -> dict[str, Any]:
-        with self._cache_lock:
-            cached = self.__class__._settings_cache
-            if cached and self._is_cache_valid(cached[0], settings.SETTINGS_CACHE_TTL_SECONDS):
+        with self.cache_lock:
+            cached = self.__class__.settings_cache
+            if cached and self.is_cache_valid(cached[0], settings.SETTINGS_CACHE_TTL_SECONDS):
                 return dict(cached[1])
 
         with db_manager.get_session() as session:
             rows = session.query(GlobalSetting).all()
             values = {row.key: row.value for row in rows}
-            merged = self._merge_settings(values)
-
-        with self._cache_lock:
-            self.__class__._settings_cache = (self._now_monotonic(), merged)
+            merged = self.merge_settings(values)
+            
+        with self.cache_lock:
+            self.__class__.settings_cache = (self.now_monotonic(), merged)
         return dict(merged)
 
     def set_setting(self, key: str, value: str) -> None:
         with db_manager.get_session() as session:
-            session.merge(GlobalSetting(key=key, value=_stringify_setting(value)))
-        self._invalidate_settings_cache()
+            session.merge(GlobalSetting(key=key, value=stringify_setting(value)))
+        self.invalidate_settings_cache()
 
     def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed_keys = {
@@ -1208,8 +1208,8 @@ class SupabaseManager:
             for key, value in payload.items():
                 if key not in allowed_keys:
                     continue
-                session.merge(GlobalSetting(key=key, value=_stringify_setting(value)))
-        self._invalidate_settings_cache()
+                session.merge(GlobalSetting(key=key, value=stringify_setting(value)))
+        self.invalidate_settings_cache()
         self.add_audit_log(
             nip="SYSTEM",
             action="settings_update",
@@ -1295,8 +1295,8 @@ class SupabaseManager:
         with db_manager.get_session() as session:
             user = session.query(User).filter(User.nip == nip).first()
             user_id = user.id if user else None
-            resolved_period_start = _coerce_optional_date(period_start)
-            resolved_period_end = _coerce_optional_date(period_end)
+            resolved_period_start = coerce_optional_date(period_start)
+            resolved_period_end = coerce_optional_date(period_end)
 
             session.query(UserPerformanceAllowance).filter(
                 UserPerformanceAllowance.nip == nip,
@@ -1451,7 +1451,7 @@ class SupabaseManager:
         period_start: Any = None,
         period_end: Any = None,
     ) -> None:
-        resolved_year = year if year is not None else _infer_allowance_year(period_code, data)
+        resolved_year = year if year is not None else infer_allowance_year(period_code, data)
         self.save_user_performance_allowance(
             nip,
             period_code,
@@ -1523,7 +1523,7 @@ class SupabaseManager:
                 .filter((User.nama.ilike(f"%{query}%")) | (User.nip.ilike(f"%{query}%")))
                 .all()
             )
-            return [self._serialize_user(user, db_settings=db_settings) for user in users]
+            return [self.serialize_user(user, db_settings=db_settings) for user in users]
 
     def get_all_telegram_ids(self) -> list[int]:
         with db_manager.get_session() as session:

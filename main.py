@@ -59,7 +59,7 @@ def show_menu():
             import requests  # type: ignore
 
             try:
-                api_url = os.getenv("INTERNAL_API_URL", "http://127.0.0.1:8000")
+                api_url = os.getenv("INTERNAL_API_URL", "http://127.0.0.1:11800")
                 api_token = os.getenv("INTERNAL_API_TOKEN") or os.getenv("MASTER_SECURITY_KEY", "")
                 requests.post(
                     f"{api_url}/internal/scheduler/restart",
@@ -146,7 +146,7 @@ if __name__ == "__main__":
             print(
                 "Star ASN console requires an interactive terminal. "
                 "For Docker production, run the API service instead: "
-                "`uvicorn api.main:app --host 0.0.0.0 --port 8000`."
+                "`uvicorn api.main:app --host 0.0.0.0 --port 11800`."
             )
             sys.exit(1)
         show_menu()

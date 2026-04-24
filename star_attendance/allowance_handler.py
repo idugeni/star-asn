@@ -121,7 +121,7 @@ class AllowanceHandler:
             return period_code
 
     @staticmethod
-    def _build_period_window(period_code: str, year: int) -> tuple[date, date]:
+    def build_period_window(period_code: str, year: int) -> tuple[date, date]:
         start_code, end_code = period_code.split("_", maxsplit=1)
         start_day = int(start_code[:2])
         start_month = int(start_code[2:])
@@ -131,8 +131,8 @@ class AllowanceHandler:
         return date(year, start_month, start_day), date(end_year, end_month, end_day)
 
     @classmethod
-    def _make_period_option(cls, period_code: str, year: int, label: str | None = None) -> AllowancePeriodOption:
-        start_date, end_date = cls._build_period_window(period_code, year)
+    def make_period_option(cls, period_code: str, year: int, label: str | None = None) -> AllowancePeriodOption:
+        start_date, end_date = cls.build_period_window(period_code, year)
         return AllowancePeriodOption(
             period_code=period_code,
             year=year,
@@ -157,11 +157,11 @@ class AllowanceHandler:
             "1511_1412",
             "1512_1401",
         ]
-        options = [cls._make_period_option(period_code, year) for period_code in period_codes]
+        options = [cls.make_period_option(period_code, year) for period_code in period_codes]
         return sorted(options, key=lambda item: item.start_date, reverse=True)
 
     @classmethod
-    def _parse_period_options(cls, html: str, year: int) -> list[AllowancePeriodOption]:
+    def parse_period_options(cls, html: str, year: int) -> list[AllowancePeriodOption]:
         soup = BeautifulSoup(html, "html.parser")
         select = soup.find("select", id="allowance_period_code") or soup.find("select", attrs={"name": "allowance_period_code"})
         if not select:
@@ -174,7 +174,7 @@ class AllowanceHandler:
                 continue
             label = " ".join(option.get_text(" ", strip=True).split())
             try:
-                options_by_code[period_code] = cls._make_period_option(period_code, year, label)
+                options_by_code[period_code] = cls.make_period_option(period_code, year, label)
             except ValueError:
                 continue
 
@@ -183,7 +183,7 @@ class AllowanceHandler:
         return sorted(options_by_code.values(), key=lambda item: item.start_date, reverse=True)
 
     @staticmethod
-    def _extract_data_url(html: str, base_url: str) -> str:
+    def extract_data_url(html: str, base_url: str) -> str:
         soup = BeautifulSoup(html, "html.parser")
         form = soup.find("form", id="form_input_budget__personal_allowance")
         action = str(form.get("action") or "").strip() if form else ""
@@ -196,19 +196,19 @@ class AllowanceHandler:
         raise ValueError("uuid_not_found")
 
     @staticmethod
-    def _extract_tkv(html: str) -> str:
+    def extract_tkv(html: str) -> str:
         tkv_match = re.search(r'name="tkv" value="([^"]+)"', html)
         if not tkv_match:
             tkv_match = re.search(r'var tkv = "([^"]+)"', html)
         return tkv_match.group(1) if tkv_match else ""
 
     @staticmethod
-    def _extract_kv_token(html: str) -> str:
+    def extract_kv_token(html: str) -> str:
         token_match = re.search(r'meta name="csrf-token" content="([^"]+)"', html)
         return token_match.group(1) if token_match else ""
 
     @classmethod
-    def _serialize_period_option(cls, option: AllowancePeriodOption) -> dict[str, Any]:
+    def serialize_period_option(cls, option: AllowancePeriodOption) -> dict[str, Any]:
         return {
             "period_code": option.period_code,
             "year": option.year,
@@ -218,7 +218,7 @@ class AllowanceHandler:
             "period_end": option.end_date.isoformat(),
         }
 
-    async def _fetch_allowance_page_context(
+    async def fetch_allowance_page_context(
         self,
         year: int,
     ) -> tuple[AllowancePageContext | None, dict[str, Any] | None]:
@@ -239,17 +239,17 @@ class AllowanceHandler:
         try:
             context = AllowancePageContext(
                 allowance_url=allowance_url,
-                data_url=self._extract_data_url(html, self.base_url),
-                tkv=self._extract_tkv(html),
-                kv_token=self._extract_kv_token(html),
-                periods=self._parse_period_options(html, year),
+                data_url=self.extract_data_url(html, self.base_url),
+                tkv=self.extract_tkv(html),
+                kv_token=self.extract_kv_token(html),
+                periods=self.parse_period_options(html, year),
             )
         except ValueError as exc:
             return None, {"status": "failed", "message": str(exc)}
 
         return context, None
 
-    def _match_period_option(
+    def match_period_option(
         self,
         context: AllowancePageContext,
         period_code: str,
@@ -258,21 +258,21 @@ class AllowanceHandler:
         for option in context.periods:
             if option.period_code == period_code and option.year == year:
                 return option
-        return self._make_period_option(period_code, year)
+        return self.make_period_option(period_code, year)
 
     async def fetch_allowance_periods(self, year: int | None = None) -> dict[str, Any]:
         target_year = year or now_local().year
-        context, error = await self._fetch_allowance_page_context(target_year)
+        context, error = await self.fetch_allowance_page_context(target_year)
         if error:
             return error
         assert context is not None
         return {
             "status": "success",
             "year": target_year,
-            "periods": [self._serialize_period_option(option) for option in context.periods],
+            "periods": [self.serialize_period_option(option) for option in context.periods],
         }
 
-    async def _post_allowance_period(
+    async def post_allowance_period(
         self,
         context: AllowancePageContext,
         period_code: str,
@@ -336,7 +336,7 @@ class AllowanceHandler:
                 "http_status": response.status_code,
             }
 
-        option = self._match_period_option(context, period_code, year)
+        option = self.match_period_option(context, period_code, year)
         payload["period_code"] = option.period_code
         payload["year"] = option.year
         payload["period_label"] = option.label
@@ -349,18 +349,18 @@ class AllowanceHandler:
         target_period = period_code or self.get_current_period_code()[0]
         logger.info(f"event=fetch_allowance status=start period={target_period} year={target_year}")
 
-        context, error = await self._fetch_allowance_page_context(target_year)
+        context, error = await self.fetch_allowance_page_context(target_year)
         if error:
             return error
         assert context is not None
         try:
-            return await self._post_allowance_period(context, target_period, target_year)
+            return await self.post_allowance_period(context, target_period, target_year)
         except Exception as exc:
             logger.error(f"event=fetch_allowance status=error message='{exc}'")
             return {"status": "failed", "message": str(exc)}
 
 
-async def _fetch_latest_available_allowance(
+async def fetch_latest_available_allowance(
     allowance_handler: AllowanceHandler,
     *,
     year: int | None = None,
@@ -368,13 +368,13 @@ async def _fetch_latest_available_allowance(
     target_year = year or now_local().year
     last_result: dict[str, Any] = {"status": "failed", "message": "Data tunjangan tidak tersedia."}
 
-    context, error = await allowance_handler._fetch_allowance_page_context(target_year)
+    context, error = await allowance_handler.fetch_allowance_page_context(target_year)
     if error:
         if error.get("message") == "session_expired":
             return error, None
         context = None
         candidate_periods = [
-            AllowanceHandler._make_period_option(code, candidate_year)
+            AllowanceHandler.make_period_option(code, candidate_year)
             for code, candidate_year in allowance_handler.get_candidate_period_codes()
         ]
     else:
@@ -386,7 +386,7 @@ async def _fetch_latest_available_allowance(
             continue
 
         result = (
-            await allowance_handler._post_allowance_period(context, option.period_code, option.year)
+            await allowance_handler.post_allowance_period(context, option.period_code, option.year)
             if context is not None
             else await allowance_handler.fetch_allowance_data(option.period_code, option.year)
         )
@@ -402,7 +402,7 @@ async def _fetch_latest_available_allowance(
     return last_result, None
 
 
-def _persist_handler_session(store: Any, nip: str, handler: LoginHandler) -> None:
+def persist_handler_session(store: Any, nip: str, handler: LoginHandler) -> None:
     cookies = handler.client.cookies.get_dict()
     if not cookies:
         return
@@ -416,14 +416,14 @@ def _persist_handler_session(store: Any, nip: str, handler: LoginHandler) -> Non
     )
 
 
-def _save_allowance_rows(
+def save_allowance_rows(
     store: Any,
     nip: str,
     payload: dict[str, Any],
     period: AllowancePeriodOption | None,
 ) -> None:
     data = cast(list[dict[str, Any]], payload["data"])
-    resolved_period = period or AllowanceHandler._make_period_option(
+    resolved_period = period or AllowanceHandler.make_period_option(
         str(payload.get("period_code") or ""),
         int(payload.get("year") or now_local().year),
         str(payload.get("period_label") or "") or None,
@@ -487,7 +487,7 @@ async def list_user_allowance_periods(nip: str, year: int | None = None) -> dict
         if login_res.get("status") != "success":
             return {"status": "failed", "message": f"Login failed: {login_res.get('message')}"}
 
-        _persist_handler_session(store, nip, handler)
+        persist_handler_session(store, nip, handler)
         allowance_handler = AllowanceHandler(handler)
         return await allowance_handler.fetch_allowance_periods(year)
     finally:
@@ -519,14 +519,14 @@ async def sync_user_allowance(
         if period_code:
             result = await allowance_handler.fetch_allowance_data(period_code, year)
             if result.get("status") == "success" and "data" in result:
-                selected_period = AllowanceHandler._make_period_option(
+                selected_period = AllowanceHandler.make_period_option(
                     str(result.get("period_code") or period_code),
                     int(result.get("year") or year or now_local().year),
                     str(result.get("period_label") or "") or None,
                 )
                 return result, selected_period
             return result, None
-        return await _fetch_latest_available_allowance(allowance_handler, year=year)
+        return await fetch_latest_available_allowance(allowance_handler, year=year)
 
     try:
         session_data = store.get_user_session(nip)
@@ -536,8 +536,8 @@ async def sync_user_allowance(
 
             result, selected_period = await fetch_with_handler()
             if result.get("status") == "success" and selected_period and "data" in result:
-                _persist_handler_session(store, nip, handler)
-                _save_allowance_rows(store, nip, result, selected_period)
+                persist_handler_session(store, nip, handler)
+                save_allowance_rows(store, nip, result, selected_period)
                 return {
                     "status": "success",
                     "period": selected_period.period_code,
@@ -554,10 +554,10 @@ async def sync_user_allowance(
         if login_res.get("status") != "success":
             return {"status": "failed", "message": f"Login failed: {login_res.get('message')}"}
 
-        _persist_handler_session(store, nip, handler)
+        persist_handler_session(store, nip, handler)
         result, selected_period = await fetch_with_handler()
         if result.get("status") == "success" and selected_period and "data" in result:
-            _save_allowance_rows(store, nip, result, selected_period)
+            save_allowance_rows(store, nip, result, selected_period)
             return {
                 "status": "success",
                 "period": selected_period.period_code,

@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 
 from star_attendance.core.config import settings
 from star_attendance.core.processor import process_single_user
+from star_attendance.core.utils import get_action_label
 
 MenuBuilder = Callable[[int], Awaitable[Any]]
 AdminChecker = Callable[[int], bool]
@@ -144,7 +145,7 @@ async def absen_manual(
         return
 
     status_message = await update.message.reply_text(
-        f"⏳ <b>MENGEKSEKUSI GUEST {action.upper()}...</b>\nTarget: <code>{nip}</code>",
+        f"⏳ <b>MENGEKSEKUSI GUEST {get_action_label(action)}...</b>\nTarget: <code>{nip}</code>",
         parse_mode=constants.ParseMode.HTML,
     )
     msg_id_container = {"id": status_message.message_id}
@@ -163,7 +164,7 @@ async def absen_manual(
             chat_id=update.effective_chat.id,
             message_id=status_message.message_id,
             text=(
-                f"{'✅' if result else '❌'} <b>EKSEKUSI {action.upper()} {'BERHASIL' if result else 'GAGAL'}</b>\n"
+                f"{'✅' if result else '❌'} <b>EKSEKUSI {get_action_label(action)} {'BERHASIL' if result else 'GAGAL'}</b>\n"
                 f"Target: <code>{nip}</code>"
             ),
             parse_mode=constants.ParseMode.HTML,

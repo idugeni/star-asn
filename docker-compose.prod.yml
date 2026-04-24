@@ -37,7 +37,7 @@ services:
     <<: *star-asn-service
     command: api
     ports:
-      - "8000:8000"
+      - "11800:11800"
     healthcheck:
       test: ["CMD", "python", "-m", "star_attendance.service_runner", "check-api"]
       start_period: 30s
@@ -87,8 +87,8 @@ services:
   portainer:
     image: portainer/portainer-ce:latest
     ports:
-      - "9000:9000"
-      - "8001:8001"
+      - "11900:9000"
+      - "11801:8001"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
@@ -105,7 +105,7 @@ services:
   uptime-kuma:
     image: louislam/uptime-kuma:latest
     ports:
-      - "3001:3001"
+      - "11301:3001"
     volumes:
       - uptime_data:/app/data
     networks:
@@ -120,7 +120,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "11090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -137,7 +137,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "11300:3000"
     volumes:
       - grafana_data:/var/lib/grafana
     networks:
@@ -153,7 +153,7 @@ services:
   loki:
     image: grafana/loki:latest
     ports:
-      - "3100:3100"
+      - "11100:3100"
     volumes:
       - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
       - loki_data:/loki

@@ -84,7 +84,7 @@ def run_service(command: str) -> int:
 
 def build_healthcheck_url() -> str:
     base_url = (
-        os.getenv("INTERNAL_API_HEALTHCHECK_URL") or os.getenv("INTERNAL_API_URL") or "http://127.0.0.1:8000"
+        os.getenv("INTERNAL_API_HEALTHCHECK_URL") or os.getenv("INTERNAL_API_URL") or "http://127.0.0.1:11800"
     ).rstrip("/")
     return f"{base_url}/healthz"
 

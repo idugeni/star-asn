@@ -7,7 +7,7 @@ APP_TIMEZONE_NAME = "Asia/Jakarta"
 APP_TIMEZONE_LABEL = "WIB"
 APP_TIMEZONE = ZoneInfo(APP_TIMEZONE_NAME)
 
-_DAY_NAMES = (
+DAY_NAMES = (
     "Senin",
     "Selasa",
     "Rabu",
@@ -17,7 +17,7 @@ _DAY_NAMES = (
     "Minggu",
 )
 
-_MONTH_NAMES = (
+MONTH_NAMES = (
     "",
     "Januari",
     "Februari",
@@ -76,7 +76,7 @@ def legacy_local_naive_to_utc_aware(value: datetime | None) -> datetime | None:
 
 def format_formal_date(value: datetime | None = None) -> str:
     local = to_local(value) or now_local()
-    return f"{_DAY_NAMES[local.weekday()]}, {local.day:02d} {_MONTH_NAMES[local.month]} {local.year}"
+    return f"{DAY_NAMES[local.weekday()]}, {local.day:02d} {MONTH_NAMES[local.month]} {local.year}"
 
 
 def format_precise_time(value: datetime | None = None) -> str:

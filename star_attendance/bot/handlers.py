@@ -55,27 +55,27 @@ store = get_store()
 internal_api = get_internal_api_client()
 
 
-def _build_runtime_options(action: str) -> RuntimeOptions:
+def build_runtime_options(action: str) -> RuntimeOptions:
     return RuntimeOptions.from_store(action, store=store)
 
 
-def _build_dashboard_message(user: Mapping[str, Any] | None) -> str:
+def build_dashboard_message(user: Mapping[str, Any] | None) -> str:
     return build_dashboard_message(user, store=store)
 
 
-def _get_global_settings_keyboard():
+def get_global_settings_keyboard():
     return get_global_settings_keyboard()
 
 
-def _build_global_settings_message() -> str:
+def build_global_settings_message() -> str:
     return build_global_settings_message(store=store)
 
 
-def _get_scheduler_keyboard():
+def get_scheduler_keyboard():
     return get_scheduler_keyboard()
 
 
-def _build_scheduler_message(status_payload: Mapping[str, Any]) -> str:
+def build_scheduler_message(status_payload: Mapping[str, Any]) -> str:
     return build_scheduler_message(status_payload)
 
 
@@ -94,7 +94,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             get_main_menu=get_main_menu,
             get_users_keyboard=get_users_keyboard,
             is_admin=is_admin,
-            build_runtime_options=_build_runtime_options,
+            build_runtime_options=build_runtime_options,
         ),
     )
 
