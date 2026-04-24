@@ -16,27 +16,64 @@ class SSOHandler:
         self.base_url = "https://demo-sso.kemenimipas.go.id"
         self.sso_url = "https://sso.kemenimipas.go.id"
         self.proxy = proxy
-        self.client: AsyncSession = AsyncSession(impersonate="chrome120", verify=False, timeout=30, proxy=self.proxy)
-        self.client.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-        })
+        
+        # EXACT ALIGNMENT WITH STAR-ASN LOGIN SYSTEM
+        from star_attendance.login_handler import MASTER_IDENTITY_HEADERS, MASTER_IDENTITY_UA
+        self.client: AsyncSession = AsyncSession(
+            impersonate="chrome120", 
+            verify=False, 
+            timeout=30, 
+            proxy=self.proxy
+        )
+        self.client.headers.update(MASTER_IDENTITY_HEADERS)
+        self.client.headers["User-Agent"] = MASTER_IDENTITY_UA
 
     async def login(self, username, password) -> dict[str, Any]:
         try:
-            # 1. Initial request to demo-sso to get redirect to Keycloak
-            resp = await self.client.get(self.base_url, allow_redirects=True)
-            if "login" not in str(resp.url).lower():
-                 # Maybe already logged in?
-                 if "Selamat anda berhasil login" in resp.text:
-                     return {"status": "success", "message": "Already logged in"}
+            # 1. Clear cookies to ensure fresh session (Same as Attendance Engine)
+            self.client.cookies.clear()
             
-            # 2. Extract login form action from Keycloak page
+            # 2. Initial request to trigger login flow
+            resp = await self.client.get(self.base_url, allow_redirects=True)
+            
+            # 3. WAF DETECTION (Same logic as LoginHandler.is_waf_interstitial)
+            if any(marker in resp.text.lower() for marker in ["security check", "checking your browser", "waf", "document.cookie='waf_token"]):
+                logger.info("SSO: Star-ASN Style WAF Challenge detected. Applying Master Bypass...")
+                # Apply global WAF cookies if available (shared with attendance system)
+                from star_attendance.login_handler import LoginHandler
+                if LoginHandler.shared_waf_cookies:
+                    for c in LoginHandler.shared_waf_cookies:
+                        self.client.cookies.set(c["name"], c["value"], domain="demo-sso.kemenimipas.go.id")
+                
+                # Manual injection for this specific portal
+                self.client.cookies.set("waf_token", "valid", domain="demo-sso.kemenimipas.go.id")
+                
+                # Retry with hardened headers
+                resp = await self.client.get(self.base_url, allow_redirects=True)
+
+            # 4. Handle Redirection to Keycloak
+            if "login" not in str(resp.url).lower() and "kc-form-login" not in resp.text:
+                logger.info("SSO: Triggering explicit OAuth bridge...")
+                resp = await self.client.get(f"{self.base_url}/OAuth/me", allow_redirects=True)
+
+            # 4. Final verification of login form
+            if "login" not in str(resp.url).lower() and "kc-form-login" not in resp.text:
+                # One last attempt: visit sso center directly if we can't get redirected
+                if "sso.kemenimipas.go.id" not in str(resp.url):
+                    logger.warning("SSO: Redirect to Keycloak failed. Is the server reachable?")
+                    return {"status": "failed", "message": "Server SSO Pusat (Keycloak) tidak merespons atau sedang Maintenance."}
+
+            # Extract login form action from Keycloak page
             soup = BeautifulSoup(resp.text, "html.parser")
             form = soup.find("form", id="kc-form-login")
             if not form:
-                return {"status": "failed", "message": "Keycloak login form not found"}
+                # Try finding by action name as fallback
+                form = soup.find("form", action=re.compile(r"login-actions/authenticate"))
+            
+            if not form:
+                snippet = resp.text[:200].replace("\n", " ")
+                logger.error(f"SSO: Form not found. URL: {resp.url} Snippet: {snippet}")
+                return {"status": "failed", "message": "Form login Keycloak tidak ditemukan. Silakan cek koneksi ke server pusat."}
             
             action_url = cast(str, form.get("action"))
             

@@ -155,71 +155,26 @@ async def post_init(application):
     else:
         logger.info("MINI_APP_URL is empty. Skipping Mini App menu button setup.")
 
-    # SYSTEM READINESS TELEMETRY
-    logger.info("Starting system telemetry collection...")
+    # SYSTEM READINESS DASHBOARD
+    logger.info("Generating system readiness dashboard...")
     try:
-        import platform
+        from star_attendance.bot.handler_views import build_startup_dashboard
+        metrics = store.get_system_metrics()
+        dashboard_msg = build_startup_dashboard(metrics)
 
-        import httpx
-
-        cpu = psutil.cpu_percent(interval=0.1)
-        ram = psutil.virtual_memory().percent
-        boot_time = psutil.boot_time()
-
-        logger.info(f"System stats - CPU: {cpu}%, RAM: {ram}%")
-
-        # Get Public IP
-        public_ip = "UNKNOWN"
-        try:
-            with httpx.Client(timeout=3.0) as client:
-                resp = client.get("https://api.ipify.org")
-                if resp.status_code == 200:
-                    public_ip = resp.text.strip()
-                    logger.info(f"Public IP obtained: {public_ip}")
-        except Exception as e:
-            logger.warning(f"Failed to fetch public IP: {e}")
-
-        # Get DB Metrics with fallback
-        metrics = {"db_provider": "PostgreSQL", "active_personnel": 0, "managed_personnel": 0, "success_today": 0}
-        try:
-            logger.info("Attempting to fetch system metrics...")
-            metrics = store.get_system_metrics()
-            logger.info(f"Metrics retrieved: {metrics}")
-        except Exception as e:
-            logger.error(f"Failed to get system metrics: {e}", exc_info=True)
-            logger.info("Using default metrics fallback")
-
-        msg = (
-            "<b>🚀 STAR-ASN ENTERPRISE: SYSTEM READY</b>\n"
-            "────────────────\n"
-            f"💻 <b>NODE:</b> <code>{platform.node()}</code>\n"
-            f"📡 <b>IP:</b> <code>{public_ip}</code>\n"
-            f"⚙️ <b>CPU:</b> <code>{cpu}%</code>\n"
-            f"🧠 <b>RAM:</b> <code>{ram}%</code>\n"
-            f"🕒 <b>UPTIME:</b> <code>{int(time.time() - boot_time) // 3600} jam</code>\n"
-            f"🗄 <b>DB:</b> <code>CONNECTED ({metrics.get('db_provider', 'Unknown')})</code>\n"
-            "────────────────\n"
-            f"👥 <b>PERSONNEL:</b> <code>{metrics.get('active_personnel', 0)} Active</code>\n"
-            f"🤖 <b>MANAGED:</b> <code>{metrics.get('managed_personnel', 0)} Scheduled</code>\n"
-            f"✅ <b>TODAY:</b> <code>{metrics.get('success_today', 0)} Successes</code>\n"
-            "────────────────\n"
-            "<i>Pusat komando kluster operasional aktif.</i>"
-        )
-
-        logger.info("Scheduling startup telemetry message (async)...")
-
-        # Schedule as background task - don't block event loop
+        # Schedule as background task to not block polling start
         async def send_startup_notify():
-            await asyncio.sleep(1)  # Give app time to start
+            await asyncio.sleep(2)  # Give app time to start polling
             try:
-                notifier.send_message_sync(msg, to_admin=False, to_group=True)
-                logger.info("Startup telemetry dispatched to log group successfully.")
+                from star_attendance.notifier import notifier
+                notifier.send_message(dashboard_msg, to_admin=False, to_group=True)
+                logger.info("Startup telemetry dashboard sent successfully.")
             except Exception as e:
-                logger.error(f"Failed to send startup telemetry: {e}", exc_info=True)
+                logger.error(f"Failed to send startup dashboard: {e}")
 
-        asyncio.create_task(send_startup_notify())  # Non-blocking schedule
+        asyncio.create_task(send_startup_notify())
     except Exception as e:
-        logger.error(f"Failed in post_init telemetry: {e}", exc_info=True)
+        logger.error(f"Failed during startup telemetry collection: {e}", exc_info=True)
 
     from star_attendance.bot.cleanup import start_global_cleanup_task
     asyncio.create_task(start_global_cleanup_task(application))
@@ -250,7 +205,10 @@ def main():
 
     verify_runtime_schema(require_pgqueuer=True)
 
-    app = ApplicationBuilder().token(token).bot_class(RecordedBot).post_init(post_init).build()
+    # Use ExtBot directly in build for custom Bot class support
+    app = ApplicationBuilder().token(token).post_init(post_init).build()
+    # Replace internal bot instance with our RecordedBot
+    app.bot = RecordedBot(token=token, private_key=None)
 
     # Registration Conversation
     reg_handler = ConversationHandler(
@@ -386,6 +344,8 @@ def main():
 
     app.add_handler(CallbackQueryHandler(handle_callback))
 
+    logger.info("Star ASN Multi-User Bot is listening...")
+    
     logger.info("Star ASN Multi-User Bot is listening...")
     app.run_polling()
 

@@ -1,4 +1,9 @@
 from __future__ import annotations
+import os
+import psutil
+import socket
+import time
+from datetime import datetime, timedelta
 
 from collections.abc import Mapping
 from functools import lru_cache
@@ -78,6 +83,61 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
         f"💎 <b>EDITION:</b> <b>{settings.BOT_EDITION}</b>"
     )
     return f"{header}\n────────────────\n{body}\n{footer}"
+
+
+def build_startup_dashboard(metrics: dict[str, Any]) -> str:
+    node_id = socket.gethostname()
+    
+    # Safe IP Fetch
+    public_ip = "UNKNOWN"
+    try:
+        import requests
+        public_ip = requests.get("https://api.ipify.org", timeout=5).text.strip()
+    except Exception:
+        pass
+
+    cpu = psutil.cpu_percent(interval=0.1)
+    ram = psutil.virtual_memory().percent
+    
+    # Process Uptime
+    try:
+        proc = psutil.Process(os.getpid())
+        uptime_seconds = int(time.time() - proc.create_time())
+        uptime_hours = uptime_seconds // 3600
+    except:
+        uptime_hours = 0
+    
+    db_status = metrics.get("db_provider", "Disconnected")
+    if metrics.get("active_personnel", 0) > 0:
+        db_status = f"CONNECTED ({db_status})"
+    else:
+        db_status = "VERIFYING..."
+
+    header = "🚀 <b>STAR-ASN ENTERPRISE: SYSTEM READY</b>"
+    section1 = (
+        f"💻 <b>NODE:</b> <code>{node_id}</code>\n"
+        f"📡 <b>IP:</b> <code>{public_ip}</code>\n"
+        f"⚙️ <b>CPU:</b> <code>{cpu}%</code>\n"
+        f"🧠 <b>RAM:</b> <code>{ram}%</code>\n"
+        f"🕒 <b>UPTIME:</b> {uptime_hours} jam\n"
+        f"🗄 <b>DB:</b> <code>{db_status}</code>"
+    )
+    
+    section2 = (
+        f"👥 <b>PERSONNEL:</b> <code>{metrics.get('active_personnel', 0)} Active</code>\n"
+        f"🤖 <b>MANAGED:</b> <code>{metrics.get('managed_personnel', 0)} Scheduled</code>\n"
+        f"✅ <b>TODAY:</b> <code>{metrics.get('success_today', 0)} Successes</code>"
+    )
+    
+    return (
+        f"{header}\n"
+        "────────────────\n"
+        f"{section1}\n"
+        "────────────────\n"
+        f"{section2}\n"
+        "────────────────\n"
+        "<i>Pusat komando kluster operasional aktif.</i>"
+    )
 
 
 @lru_cache(maxsize=1)
