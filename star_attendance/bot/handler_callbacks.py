@@ -148,6 +148,7 @@ async def sync_sso_profile(message: Message, *, services: CallbackServices, tid:
         "⏳ <b>SEDANG SINKRONISASI DATA SSO...</b>\n"
         "<i>Menghubungkan ke portal SSO Pusat untuk memverifikasi data Anda.</i>",
         parse_mode=constants.ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]]),
     )
 
     from star_attendance.sso_handler import sync_sso_data
@@ -315,6 +316,7 @@ async def trigger_mass_action(
         f"🚀 <b>MENGEKSEKUSI AKTIVASI {get_action_label(action)}...</b>\n"
         "Menginisialisasi cluster workers untuk seluruh personel.",
         parse_mode=constants.ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup([[get_back_button()]]),
     )
     options = services.build_runtime_options(action)
     services.store.clear_mass_stop()
@@ -365,6 +367,7 @@ async def trigger_single_action(
         f"👤 <b>Target:</b> <code>{user['nama']}</code>\n"
         "<i>Mohon tunggu, sedang melakukan verifikasi keamanan & memproses data.</i>",
         parse_mode=constants.ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup([[get_back_button(f"manage_user_{target_nip}")]])
     )
 
     # 2. Prepare options
@@ -389,7 +392,7 @@ async def trigger_single_action(
                 f"<i>{status_msg}</i>"
             )
             if isinstance(sent_msg, Message):
-                await services.edit_message(sent_msg, updated_text, None)
+                await services.edit_message(sent_msg, updated_text, InlineKeyboardMarkup([[get_back_button(f"manage_user_{target_nip}")]]))
         except Exception:
             pass
 
@@ -876,6 +879,7 @@ async def sync_allowance(
         "⏳ <b>SEDANG MENGAMBIL DATA TUNJANGAN...</b>\n"
         "<i>Mohon tunggu, sedang login ke portal budget & mengekstraksi data periode yang dipilih.</i>",
         parse_mode=constants.ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup([[get_back_button("view_allowance_menu")]]),
     )
 
     from star_attendance.allowance_handler import sync_user_allowance

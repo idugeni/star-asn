@@ -74,11 +74,18 @@ async def monitor_mass_progress(context: ContextTypes.DEFAULT_TYPE, chat_id, mes
 
         if msg != last_text:
             try:
+                from telegram import InlineKeyboardMarkup
                 await context.bot.edit_message_text(
-                    chat_id=chat_id, message_id=message_id, text=msg, parse_mode=constants.ParseMode.HTML
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=msg,
+                    reply_markup=InlineKeyboardMarkup([[get_back_button()]]),
+                    parse_mode=constants.ParseMode.HTML
                 )
                 last_text = msg
-            except Exception:
-                pass
-
-        await asyncio.sleep(1.5) # Faster updates for "cool" effect
+            except Exception as e:
+                # If message is deleted or edited by someone else, stop monitoring
+                if "Message is not modified" not in str(e):
+                    break
+        
+        await asyncio.sleep(1.5)

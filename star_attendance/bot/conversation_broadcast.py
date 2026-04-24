@@ -47,8 +47,11 @@ async def exec_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         except Exception:
             pass
 
+    from star_attendance.bot.ui import get_back_button
+    from telegram import InlineKeyboardMarkup
     await update.message.reply_text(
-        f"✅ Broadcast selesai: {success_count} terkirim, {len(telegram_ids) - success_count} gagal."
+        f"✅ Broadcast selesai: {success_count} terkirim, {len(telegram_ids) - success_count} gagal.",
+        reply_markup=InlineKeyboardMarkup([[get_back_button()]])
     )
     return ConversationHandler.END
 

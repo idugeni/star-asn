@@ -34,6 +34,10 @@ LOGIN_FAILURE_STAGE_MESSAGES = {
     "captcha_failed": "Captcha portal tidak valid.",
     "login_form_unavailable": "Form login portal tidak tersedia.",
     "waf_timeout": "WAF timeout sebelum form login tersedia.",
+    "portal_maintenance": "Sistem portal sedang dalam pemeliharaan.",
+    "waf_blocked": "Akses diblokir oleh WAF (Security Challenge).",
+    "network_timeout": "Koneksi ke portal terputus (Timeout).",
+    "network_refused": "Portal menolak koneksi (Port 443 blocked/Down).",
 }
 
 

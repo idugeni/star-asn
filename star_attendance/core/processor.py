@@ -29,6 +29,10 @@ LOGIN_FAILURE_STAGE_MESSAGES = {
     "captcha_failed": "Captcha portal tidak valid.",
     "login_form_unavailable": "Form login portal tidak tersedia.",
     "waf_timeout": "WAF timeout sebelum form login tersedia.",
+    "portal_maintenance": "Sistem portal sedang dalam pemeliharaan.",
+    "waf_blocked": "Akses diblokir oleh WAF (Security Challenge).",
+    "network_timeout": "Koneksi ke portal terputus (Timeout).",
+    "network_refused": "Portal menolak koneksi (Port 443 blocked/Down).",
 }
 
 
@@ -43,23 +47,57 @@ def safe_last_success_record(store: Any, nip: str, action: str) -> tuple[Any | N
 
 
 def resolve_login_error(login_result: Any) -> str:
+    """
+    Transforms raw login results and technical exceptions into human-readable 
+    smart error messages with actionable intelligence.
+    """
+    if not login_result:
+        return "Gagal login atau data tidak ditemukan."
+
+    # 1. Handle Mapping results (from LoginHandler.build_result)
     if isinstance(login_result, Mapping):
-        if login_result.get("status") == "success":
+        status = str(login_result.get("status") or "").strip()
+        if status == "success":
             return "Dashboard tidak bisa diverifikasi setelah login."
 
+        # If a direct human-friendly message exists, prioritize it
         message = login_result.get("message")
-        if message not in (None, ""):
+        if message and not any(x in str(message).lower() for x in ["exception", "curl:", "failed to perform"]):
             return str(message)
 
+        # Map failure stages
         failure_stage = str(login_result.get("failure_stage") or "").strip()
+        if failure_stage in LOGIN_FAILURE_STAGE_MESSAGES:
+            return LOGIN_FAILURE_STAGE_MESSAGES[failure_stage]
+
+        # Deep Inspection of Error String for technical codes
+        err_str = str(message or login_result).lower()
+        if "curl: (7)" in err_str:
+            return "❌ Portal menolak koneksi (Connection Refused). Cek firewall atau status server."
+        if "curl: (28)" in err_str or "timed out" in err_str:
+            return "⏳ Koneksi ke portal timeout. Server portal sedang sangat lambat."
+        if "curl: (35)" in err_str or "ssl" in err_str:
+            return "🔒 Kesalahan Handshake SSL. Sertifikat portal mungkin bermasalah."
+        if "403" in err_str or "forbidden" in err_str:
+            return "🛡️ Akses diblokir oleh WAF (403 Forbidden). Cek reputasi IP."
+        if "502" in err_str or "503" in err_str or "504" in err_str:
+            return "🚧 Portal sedang down atau overload (Gateway Error)."
+        
         if failure_stage:
-            return LOGIN_FAILURE_STAGE_MESSAGES.get(failure_stage, f"Login gagal ({failure_stage})")
+            return f"Login gagal ({failure_stage})"
+        
+        return "Login gagal. Cek log sistem untuk detail teknis."
 
-        status = str(login_result.get("status") or "").strip()
-        if status:
-            return "Login gagal." if status in {"failed", "error"} else f"Login gagal ({status})"
-
-    return str(login_result) if login_result else "Login gagal atau password tidak ditemukan"
+    # 2. Handle raw string errors (exceptions)
+    err_str = str(login_result).lower()
+    if "curl: (7)" in err_str:
+        return "❌ Portal Down / Connection Refused (Curl 7)."
+    if "curl: (28)" in err_str:
+        return "⏳ Portal Timeout (Curl 28)."
+    if "credentials" in err_str:
+        return "🔑 NIP atau Password salah."
+    
+    return f"Gagal: {login_result}"
 
 
 async def process_single_user(
@@ -199,7 +237,7 @@ async def process_single_user(
                     result = False
             except Exception as e:
                 log("INFO", f"Attempt {attempt} failed: {e}", scope=scope)
-                last_error = str(e)
+                last_error = resolve_login_error(str(e))
                 result = False
 
             if result is not True and attempt < retry_max:

@@ -61,6 +61,7 @@ async def man_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await query.message.edit_text(
         f"<b>🤖 OTOMASI {get_action_label(action)}</b>\n────────────────\n⏳ Mengeksekusi manual {get_action_label(action)}...",
         parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ KEMBALI", callback_data="main_menu")]])
     )
     status_message = query.message
     msg_id_container = {"id": status_message.message_id}
@@ -74,6 +75,7 @@ async def man_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             await status_message.edit_text(
                 f"<b>🤖 OTOMASI {get_action_label(action)}</b>\n────────────────\n🔄 {text}",
                 parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ KEMBALI", callback_data="main_menu")]])
             )
         except Exception:
             pass

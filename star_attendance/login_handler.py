@@ -761,13 +761,30 @@ class LoginHandler:
                         failure_reason = dashboard_message or "Response portal tidak valid (Bukan JSON)."
 
             except Exception as e:
-                log("ERROR", f"event=login exception={e}")
+                err_str = str(e).lower()
+                failure_stage = "network_error"
+                
+                # Smart Technical Error Mapping
+                if "curl: (7)" in err_str:
+                    failure_stage = "network_refused"
+                    failure_reason = "❌ Portal Down atau koneksi ditolak (Curl 7)."
+                elif "curl: (28)" in err_str or "timed out" in err_str:
+                    failure_stage = "network_timeout"
+                    failure_reason = "⏳ Koneksi timeout (Portal lambat/Down)."
+                elif "ssl" in err_str or "curl: (35)" in err_str:
+                    failure_stage = "ssl_error"
+                    failure_reason = "🔒 Kesalahan Sertifikat SSL Portal."
+                else:
+                    failure_reason = f"Network Exception: {e}"
+                
+                log("ERROR", f"event=login status=failed stage={failure_stage} error={e}")
                 await asyncio.sleep(1)
 
         return self.build_result(
             "failed",
             message=failure_reason or "Gagal login setelah beberapa percobaan.",
             session_source="HTTP",
+            failure_stage=failure_stage if 'failure_stage' in locals() else "unknown_failure"
         )
 
     async def run_browser_login_fallback(self, username, password, action, location, status_callback, start_time=None):
