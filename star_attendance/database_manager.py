@@ -1277,7 +1277,7 @@ class SupabaseManager:
             self.set_setting(f"mass_{key}", str(value))
 
     def increment_mass_pos(self) -> int:
-        """Atomically increments the mass attendance progress position."""
+        """Atomically increments the mass attendance progress position and handles completion."""
         with db_manager.get_session() as session:
             session.execute(
                 text(
@@ -1286,9 +1286,12 @@ class SupabaseManager:
                 )
             )
             session.commit()
-            res = session.execute(text("SELECT value FROM settings WHERE key = 'mass_pos'")).scalar()
-            return int(res or 0)
-
+            pos = int(session.execute(text("SELECT value FROM settings WHERE key = 'mass_pos'")).scalar() or 0)
+            total = int(session.execute(text("SELECT value FROM settings WHERE key = 'mass_total'")).scalar() or 0)
+            if pos >= total and total > 0:
+                session.execute(text("UPDATE settings SET value = '0' WHERE key = 'mass_active'"))
+                session.commit()
+            return pos
     def add_mass_log(self, nip: str, name: str, status: str) -> None:
         """Adds a log entry to the rolling mass attendance log (max 5 entries)."""
         import json
@@ -1297,7 +1300,7 @@ class SupabaseManager:
             logs = json.loads(str(current)) if current else []
             
             status_emoji = "✅" if status == "success" else "❌" if status == "failed" else "⚠️"
-            entry = f"{status_emoji} {name[:12]} ({nip[-4:]}) - {status.upper()}"
+            entry = f"{status_emoji} {name} ({nip}) - {status.upper()}"
             
             logs.insert(0, entry)
             logs = logs[:5]  # Keep only last 5

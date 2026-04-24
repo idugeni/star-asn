@@ -137,7 +137,7 @@ async def process_single_user(
                     action,
                     "skipped",
                     duration=0,
-                    to_group=False,
+                    to_group=True,
                     to_admin=False,
                     to_user=True,
                     user_chat_id=user_chat_id,
