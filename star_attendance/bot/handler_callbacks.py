@@ -153,33 +153,64 @@ async def sync_sso_profile(message: Message, *, services: CallbackServices, tid:
 
     from star_attendance.sso_handler import sync_sso_data
 
+    async def sso_progress(text: str):
+        try:
+            await message.edit_text(
+                f"🔄 <b>SINKRONISASI SSO</b>\n"
+                f"────────────────\n"
+                f"{text}\n"
+                f"────────────────\n"
+                f"<i>Mohon tunggu, sedang memproses identitas...</i>",
+                parse_mode=constants.ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]])
+            )
+        except: pass
+
     try:
-        # Use existing credentials for SSO
-        res = await sync_sso_data(user["nip"], user["password"])
+        # Use existing credentials for SSO with progress reporting
+        res = await sync_sso_data(user["nip"], user["password"], on_progress=sso_progress)
+        
         if res["status"] == "success":
+            await sso_progress("💾 Menyimpan data ke database...")
             data = res["data"]
             # Update user profile in local DB
             update_payload = {}
-            if data.get("nama"):
-                update_payload["nama"] = data["nama"]
-            if data.get("nama_upt"):
-                update_payload["upt_id"] = data["nama_upt"]
-            
-            # Additional SSO fields
+            if data.get("nama"): update_payload["nama"] = data["nama"]
+            if data.get("nama_upt"): update_payload["upt_id"] = data["nama_upt"]
             if data.get("jabatan"): update_payload["jabatan"] = data["jabatan"]
             if data.get("divisi"): update_payload["divisi"] = data["divisi"]
             if data.get("pangkat"): update_payload["pangkat"] = data["pangkat"]
             if data.get("email"): update_payload["email"] = data["email"]
+            if data.get("sso_sub"): update_payload["sso_sub"] = data["sso_sub"]
+            if data.get("birth_date"): update_payload["birth_date"] = data["birth_date"]
+            if data.get("birth_place"): update_payload["birth_place"] = data["birth_place"]
 
             if update_payload:
                 services.store.update_user_settings(user["nip"], update_payload)
 
+            # Formatting Date to Indonesian (e.g., 21 September 1998)
+            formatted_birth = data.get('birth_date', '-')
+            if formatted_birth and "-" in formatted_birth:
+                try:
+                    parts = formatted_birth.split("-")
+                    months = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+                    day = int(parts[2])
+                    month = months[int(parts[1])]
+                    year = parts[0]
+                    formatted_birth = f"{day} {month} {year}"
+                except: pass
+
             await message.edit_text(
                 "✅ <b>SINKRONISASI BERHASIL</b>\n"
-                f"Data Anda telah diperbarui dari sistem pusat.\n\n"
+                "Data Anda telah diperbarui dari sistem pusat.\n\n"
                 f"👤 <b>Nama:</b> <code>{data.get('nama')}</code>\n"
+                f"🔢 <b>NIP:</b> <code>{data.get('nip')}</code>\n"
+                f"🆔 <b>SSO UUID:</b> <code>{data.get('sso_sub')}</code>\n\n"
                 f"🏢 <b>Unit:</b> <code>{data.get('nama_upt')}</code>\n"
+                f"🗂️ <b>Divisi:</b> <code>{data.get('divisi')}</code>\n"
                 f"🛡️ <b>Jabatan:</b> <code>{data.get('jabatan')}</code>\n"
+                f"🎖️ <b>Golongan:</b> <code>{data.get('pangkat')}</code>\n\n"
+                f"🎂 <b>Lahir:</b> <code>{data.get('birth_place')}, {formatted_birth}</code>\n"
                 f"📧 <b>Email:</b> <code>{data.get('email')}</code>",
                 parse_mode=constants.ParseMode.HTML,
                 reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]])

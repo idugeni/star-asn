@@ -74,74 +74,91 @@ async def reg_nip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def reg_pass(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.message or not update.message.text:
+    if not update.message or not update.message.text or not update.effective_user:
         return WAIT_REG_PASS
+        
     user_cache = cast(dict[str, Any], context.user_data)
-    user_cache["reg_pass"] = update.message.text
-    await update.message.reply_text(
-        "👤 <b>LANGKAH 3/4: PROFIL</b>\n────────────────\n"
-        "Password tersimpan. Silakan masukkan <b>NAMA LENGKAP</b> Anda sesuai data kepegawaian:",
+    nip = str(user_cache.get("reg_nip"))
+    password = update.message.text
+    tid = update.effective_user.id
+
+    status_msg = await update.message.reply_text(
+        "⏳ <b>MENAUTKAN AKUN KE SSO PUSAT...</b>\n"
+        "────────────────\n"
+        "<i>Sedang memverifikasi kredensial dan mengambil profil digital Anda secara otomatis.</i>",
         parse_mode="HTML",
     )
-    return WAIT_REG_NAME
 
-
-async def reg_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.message or not update.message.text:
-        return WAIT_REG_NAME
-    user_cache = cast(dict[str, Any], context.user_data)
-    user_cache["reg_name"] = update.message.text
-
-    upt_list = store.get_all_upts()
-    keyboard = get_upt_keyboard(upt_list, callback_prefix="reg_upt_")
-
-    await update.message.reply_text(
-        "🏢 <b>LANGKAH 4/4: UNIT KERJA (UPT)</b>\n────────────────\n"
-        "Silakan pilih <b>Unit Kerja</b> tempat Anda bertugas dari daftar di bawah:",
-        parse_mode="HTML",
-        reply_markup=keyboard,
-    )
-    return WAIT_REG_UPT
-
-
-async def reg_upt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    user_cache = cast(dict[str, Any], context.user_data)
-
-    if query:
-        await query.answer()
-        data = query.data or ""
-        user_cache["reg_upt"] = data.replace("reg_upt_", "")
-    else:
-        if not update.message or not update.message.text:
-            return WAIT_REG_UPT
-        user_cache["reg_upt"] = update.message.text
-
-    if not update.effective_user:
-        return ConversationHandler.END
-
-    user_data = {
-        "nip": user_cache.get("reg_nip"),
-        "password": user_cache.get("reg_pass"),
-        "nama": user_cache.get("reg_name"),
-        "upt_id": user_cache.get("reg_upt"),
-        "telegram_id": update.effective_user.id,
-    }
-
-    if store.add_user(user_data):
-        sync_note = ""
-        try:
-            await internal_api.restart_scheduler()
-        except Exception as exc:
-            sync_note = f"\n⚠️ Sinkronisasi scheduler belum berhasil: <code>{exc}</code>"
-        if update.message:
-            await update.message.reply_text(
-                "✅ Registrasi Berhasil!\n"
-                f"Selamat bergabung, {user_data['nama']}. Data Anda telah terhubung dengan Telegram ID: {user_data['telegram_id']}\n\n"
-                f"Ketik /start untuk membuka dashboard.{sync_note}",
-                parse_mode="HTML",
+    from star_attendance.sso_handler import SSOHandler
+    sso = SSOHandler()
+    
+    try:
+        login_res = await sso.login(nip, password)
+        if login_res.get("status") != "success":
+            await status_msg.edit_text(
+                f"❌ <b>LOGIN SSO GAGAL</b>\n────────────────\n"
+                f"{login_res.get('message', 'NIP atau Password salah.')}\n\n"
+                "Silakan masukkan kembali <b>PASSWORD</b> Anda yang benar:",
+                parse_mode="HTML"
             )
-    elif update.message:
-        await update.message.reply_text("❌ Terjadi kesalahan saat menyimpan data. Silakan hubungi admin.")
+            return WAIT_REG_PASS
+
+        profile_res = await sso.fetch_profile()
+        if profile_res.get("status") != "success":
+            await status_msg.edit_text(
+                "❌ <b>GAGAL MENGAMBIL PROFIL</b>\n────────────────\n"
+                "Login berhasil, namun data profil tidak ditemukan di server pusat.\n\n"
+                "Silakan hubungi administrator.",
+                parse_mode="HTML"
+            )
+            return ConversationHandler.END
+
+        data = profile_res.get("data", {})
+        
+        # Automatic Account Creation
+        user_data = {
+            "nip": nip,
+            "password": password,
+            "nama": data.get("nama", "ASN User"),
+            "upt_id": data.get("nama_upt"), # resolve_upt_id in store will handle name-to-id mapping
+            "telegram_id": tid,
+            "jabatan": data.get("jabatan"),
+            "divisi": data.get("divisi"),
+            "pangkat": data.get("pangkat"),
+            "email": data.get("email"),
+            "birth_date": data.get("birth_date"),
+            "birth_place": data.get("birth_place"),
+            "sso_sub": data.get("sso_sub"),
+        }
+
+        if store.add_user(user_data):
+            try:
+                await internal_api.restart_scheduler()
+            except Exception:
+                pass
+            
+            await status_msg.edit_text(
+                "✅ <b>REGISTRASI OTOMATIS BERHASIL</b>\n────────────────\n"
+                f"Selamat datang, <b>{user_data['nama']}</b>!\n\n"
+                "Sistem telah berhasil:\n"
+                "✔ Memverifikasi identitas SSO\n"
+                "✔ Mengunduh profil profesional\n"
+                "✔ Menghubungkan Telegram ID\n"
+                "✔ Menetapkan lokasi UPT otomatis\n\n"
+                "Gunakan /start untuk masuk ke Dashboard Utama.",
+                parse_mode="HTML"
+            )
+        else:
+            await status_msg.edit_text(
+                "❌ <b>DATABASE ERROR</b>\n────────────────\n"
+                "Gagal menyimpan data ke database. Silakan hubungi admin.",
+                parse_mode="HTML"
+            )
+            
+    except Exception as e:
+        await status_msg.edit_text(
+            f"❌ <b>SYSTEM ERROR</b>\n────────────────\n<code>{str(e)}</code>",
+            parse_mode="HTML"
+        )
 
     return ConversationHandler.END

@@ -55,6 +55,9 @@ class User(Base):
     divisi = Column(String(255), nullable=True)
     pangkat = Column(String(100), nullable=True)
     email = Column(String(255), nullable=True)
+    sso_sub = Column(UUID(as_uuid=True), nullable=True, unique=True)
+    birth_date = Column(String(20), nullable=True)
+    birth_place = Column(String(255), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=now_storage)
     updated_at = Column(DateTime(timezone=True), default=now_storage, onupdate=now_storage)

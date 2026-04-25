@@ -114,7 +114,7 @@ async def get_main_menu(telegram_id: int) -> InlineKeyboardMarkup:
     else:
         user = store.get_user_by_telegram_id(telegram_id)
         if not user:
-            keyboard = [[InlineKeyboardButton("📝 REGISTRASI AKUN SAYA", callback_data="start_reg")]]
+            keyboard = [[InlineKeyboardButton("🔐 LOGIN SSO & REGISTRASI OTOMATIS", callback_data="start_reg")]]
 
     return InlineKeyboardMarkup(keyboard)
 

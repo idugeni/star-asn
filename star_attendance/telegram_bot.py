@@ -57,10 +57,8 @@ from star_attendance.bot.conversations import (
     exec_broadcast,
     exec_search,
     man_execute,
-    reg_name,
     reg_nip,
     reg_pass,
-    reg_upt,
     set_days,
     set_in,
     set_loc,
@@ -87,7 +85,7 @@ from star_attendance.bot.handlers import (
     start,
 )
 from star_attendance.core.config import settings
-from star_attendance.db.bootstrap import verify_runtime_schema
+from star_attendance.db.bootstrap import apply_pending_migrations, verify_runtime_schema
 
 # Logging Setup
 logging.basicConfig(
@@ -203,6 +201,8 @@ def main():
         logger.error("TELEGRAM_BOT_TOKEN not found in environment.")
         return
 
+    # Ensure DB is up to date
+    apply_pending_migrations()
     verify_runtime_schema(require_pgqueuer=True)
 
     # Use ExtBot directly in build for custom Bot class support
@@ -216,11 +216,6 @@ def main():
         states={
             WAIT_REG_NIP: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_nip)],
             WAIT_REG_PASS: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_pass)],
-            WAIT_REG_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_name)],
-            WAIT_REG_UPT: [
-                CallbackQueryHandler(reg_upt, pattern="^reg_upt_"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, reg_upt),
-            ],
         },
         fallbacks=[CommandHandler("cancel", cancel_convo)],
     )

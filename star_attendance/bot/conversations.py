@@ -15,7 +15,7 @@ from .conversation_admin import (
 )
 from .conversation_broadcast import exec_broadcast, exec_search, start_broadcast, start_search
 from .conversation_manual import man_execute, start_manual
-from .conversation_registration import reg_name, reg_nip, reg_pass, reg_upt, start_reg
+from .conversation_registration import reg_nip, reg_pass, start_reg
 from .conversation_settings import (
     cancel_convo,
     set_days,
@@ -64,10 +64,8 @@ __all__ = [
     "exec_search",
     "get_user_id",
     "man_execute",
-    "reg_name",
     "reg_nip",
     "reg_pass",
-    "reg_upt",
     "set_days",
     "set_in",
     "set_loc",

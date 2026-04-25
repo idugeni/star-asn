@@ -39,7 +39,7 @@ async def start(
             "────────────────\n\n"
             "      <b>SISTEM OTOMASI KEHADIRAN CERDAS</b>\n\n"
             "────────────────\n"
-            "Silakan daftarkan NIP Anda melalui tombol di bawah untuk memulai revolusi efisiensi kerja Anda."
+            "Silakan ketuk tombol di bawah untuk <b>Login via SSO</b>. Sistem akan mengonfigurasi akun Anda secara otomatis."
         )
         await update.message.reply_text(
             welcome_text,

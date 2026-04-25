@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 
 from api.scheduler import AttendanceScheduler
 from star_attendance.core.config import settings
-from star_attendance.db.bootstrap import verify_runtime_schema
+from star_attendance.db.bootstrap import apply_pending_migrations, verify_runtime_schema
 from star_attendance.runtime import get_store
 
 logger = logging.getLogger("api")
@@ -86,6 +86,7 @@ def require_internal_token(x_internal_token: str | None = Header(default=None)) 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    apply_pending_migrations()
     verify_runtime_schema(require_pgqueuer=True)
     # Start the background listener for real-time DB changes
     asyncio.create_task(listen_to_db_notifications())

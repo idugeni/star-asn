@@ -311,10 +311,20 @@ class SupabaseManager:
         try:
             return str(uuid.UUID(str(upt_input)))
         except ValueError:
-            upt_rec = session.query(UPT).filter(UPT.nama_upt == str(upt_input)).first()
+            name = str(upt_input).strip()
+            upt_rec = session.query(UPT).filter(UPT.nama_upt == name).first()
             if upt_rec:
                 return str(upt_rec.id)
-            new_upt = UPT(nama_upt=str(upt_input))
+            
+            # Automated Geocoding for New UPTs
+            from star_attendance.core.geo import resolve_upt_coordinates_sync
+            geo = resolve_upt_coordinates_sync(name)
+            
+            new_upt = UPT(
+                nama_upt=name,
+                latitude=geo["latitude"] if geo else None,
+                longitude=geo["longitude"] if geo else None,
+            )
             session.add(new_upt)
             session.flush()
             return str(new_upt.id)

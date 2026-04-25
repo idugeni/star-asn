@@ -100,12 +100,17 @@ def build_startup_dashboard(metrics: dict[str, Any]) -> str:
     except Exception:
         pass
 
-    # Process-specific CPU usage is more accurate in Docker
+    # Enhanced System Telemetry
+    try:
         proc = psutil.Process(os.getpid())
-        cpu = proc.cpu_percent(interval=0.5)
+        # First call might return 0, we use a slight interval for accuracy
+        proc_cpu = proc.cpu_percent(interval=0.1) 
+        # System-wide CPU is often more interesting for the admin
+        system_cpu = psutil.cpu_percent(interval=0.5)
         mem_info = proc.memory_info().rss / (1024 * 1024) # MB
-    except:
-        cpu = 0.0
+    except Exception:
+        proc_cpu = 0.0
+        system_cpu = 0.0
         mem_info = 0.0
     ram_pct = psutil.virtual_memory().percent
     
@@ -134,7 +139,7 @@ def build_startup_dashboard(metrics: dict[str, Any]) -> str:
     section1 = (
         f"💻 <b>NODE:</b> <code>{node_id}</code>\n"
         f"📡 <b>IP:</b> <code>{public_ip}</code>\n"
-        f"⚙️ <b>CPU:</b> <code>{cpu:.1f}%</code>\n"
+        f"⚙️ <b>CPU:</b> <code>{proc_cpu:.1f}%</code> (Sistem: {system_cpu:.1f}%)\n"
         f"🧠 <b>RAM:</b> <code>{mem_info:.1f} MB</code> (Sistem: {ram_pct}%)\n"
         f"🕒 <b>UPTIME:</b> {uptime_str}\n"
         f"🗄 <b>DB:</b> <code>{db_status}</code>"
