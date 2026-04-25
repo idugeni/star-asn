@@ -40,8 +40,7 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # === Supabase & Database ===
-supabase/.temp/
-supabase/storage/
+supabase/
 *.db
 *.sqlite
 *.sqlite3
@@ -113,8 +112,6 @@ bld/
 # === Local Development & Monitoring ===
 tests/
 tools/
-scripts/
-monitoring/
 apply_performance_fixes.py
 deploy.ps1
 publish.ps1
