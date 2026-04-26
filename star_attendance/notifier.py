@@ -111,6 +111,19 @@ class TelegramNotifier:
             print(f"Edit Message Error: {exc}")
             return False
 
+    def delete_message(self, chat_id: int | str, message_id: int) -> bool:
+        """Deletes an existing message."""
+        if not self.is_active:
+            return False
+        url = f"https://api.telegram.org/bot{self.token}/deleteMessage"
+        payload = {"chat_id": str(chat_id), "message_id": int(message_id)}
+        try:
+            response = self.session.post(url, json=payload, timeout=10)
+            return response.status_code == 200
+        except Exception as exc:
+            print(f"Delete Message Error: {exc}")
+            return False
+
     def send_message_sync_get_id(self, message: str, to_admin: bool = True, to_group: bool = True) -> dict[int, int]:
         """Sends message immediately and returns mapping of chat_id to message_id."""
         return self.send_now(message, self.resolve_targets(to_admin, to_group))
@@ -324,7 +337,7 @@ class TelegramNotifier:
         if logs and isinstance(logs, list):
             lines.append("")
             for log_entry in logs:
-                lines.append(f"<code>{escape_text(log_entry)}</code>")
+                lines.append(f"<blockquote>{escape_text(log_entry)}</blockquote>")
         # Technical Indicators Table
         lines.extend(
             [
@@ -405,8 +418,30 @@ class TelegramNotifier:
         )
 
         # CONSOLIDATED: Send ONLY the detailed debug log to telemetry group (final message only)
-        if to_group:
-            self.send_message(self.format_debug_log(payload), to_admin=False, to_group=True)
+        # IMPLEMENTED: Smart Cleaner (Auto-delete previous group alert to prevent spam)
+        if to_group and self.log_group_id:
+            try:
+                from star_attendance.runtime import get_store
+                store = get_store()
+                
+                # Use a specific key for the global telemetry group cleanup
+                # We could also use f"last_msg_group_{nip}" for per-user cleanup,
+                # but "only 1 latest" globally is cleaner for high-volume clusters.
+                cleanup_key = "last_telemetry_msg_id"
+                last_id_str = store.get_setting(cleanup_key)
+                
+                if last_id_str and last_id_str.isdigit():
+                    self.delete_message(self.log_group_id, int(last_id_str))
+                
+                # Send the new one synchronously to get the ID for next cleanup
+                results = self.send_now(self.format_debug_log(payload), [self.log_group_id])
+                new_msg_id = results.get(int(self.log_group_id))
+                if new_msg_id:
+                    store.set_setting(cleanup_key, str(new_msg_id))
+            except Exception as e:
+                # Fallback to normal send if store or delete fails
+                print(f"Smart Cleaner Error: {e}")
+                self.send_message(self.format_debug_log(payload), to_admin=False, to_group=True)
 
         if to_user:
             if user_message_id and user_chat_id:

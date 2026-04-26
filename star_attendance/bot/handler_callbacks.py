@@ -479,6 +479,8 @@ async def handle_callback(
     tid = query.from_user.id
     data = query.data or ""
     message = query.message
+    from star_attendance.core.utils import log as core_log
+    core_log("INFO", f"callback-received data={data} user={tid}", scope="BOT")
 
     try:
         target_nip: str | None = None

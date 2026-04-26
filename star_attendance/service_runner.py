@@ -13,6 +13,7 @@ from collections.abc import Callable
 SERVICE_TARGETS: dict[str, str] = {
     "bootstrap": "star_attendance.bootstrap_db:main",
     "api": "api.main:start_api",
+    "api-full": "api.main:start_api", # Special handling in run_service
     "worker": "star_attendance.worker_pg:run",
     "bot": "star_attendance.telegram_bot:main",
 }
@@ -20,6 +21,7 @@ SERVICE_TARGETS: dict[str, str] = {
 REQUIRED_ENV: dict[str, tuple[str, ...]] = {
     "bootstrap": ("POSTGRES_URL", "MASTER_SECURITY_KEY"),
     "api": ("POSTGRES_URL", "MASTER_SECURITY_KEY"),
+    "api-full": ("POSTGRES_URL", "MASTER_SECURITY_KEY"),
     "worker": ("POSTGRES_URL", "MASTER_SECURITY_KEY"),
     "bot": ("TELEGRAM_BOT_TOKEN", "POSTGRES_URL", "MASTER_SECURITY_KEY"),
 }
@@ -77,6 +79,16 @@ def resolve_retry_settings() -> tuple[int, float]:
 
 def run_service(command: str) -> int:
     require_env(command)
+    
+    if command == "api-full":
+        logger.info("Service 'api-full' detected. Running database bootstrap first...")
+        bootstrap_target = load_callable(SERVICE_TARGETS["bootstrap"])
+        bootstrap_result = bootstrap_target()
+        if isinstance(bootstrap_result, int) and bootstrap_result != 0:
+            logger.error("Bootstrap failed with code %s. Aborting API startup.", bootstrap_result)
+            return bootstrap_result
+        logger.info("Bootstrap successful. Starting API...")
+
     target = load_callable(SERVICE_TARGETS[command])
     result = target()
     return int(result) if isinstance(result, int) else 0

@@ -29,6 +29,13 @@
     --radius-lg: var(--radius);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-sm: calc(var(--radius) * 0.6);
+
+    --animate-spin-slow: spin-slow 3s linear infinite;
+
+    @keyframes spin-slow {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
 }
 
 :root {
@@ -80,8 +87,8 @@
 
   #app {
     display: flex;
-    justify-content: center;
-    align-items: center;
+    flex-direction: column;
+    min-height: 100vh;
   }
 
   body {
@@ -91,10 +98,30 @@
 }
 
 @utility glass {
-  background: oklch(1 0 0 / 0.03);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: oklch(1 0 0 / 0.05);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid oklch(1 0 0 / 0.1);
+}
+
+@utility glass-premium {
+  background: linear-gradient(135deg, oklch(1 0 0 / 0.08), oklch(1 0 0 / 0.02));
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  box-shadow: 0 8px 32px 0 oklch(0 0 0 / 0.37);
+}
+
+@utility text-glow {
+  text-shadow: 0 0 15px var(--color-primary);
+}
+
+@utility mesh-bg {
+  background-image: 
+    radial-gradient(at 0% 0%, oklch(0.6 0.18 250 / 0.05) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, oklch(0.6 0.18 250 / 0.05) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, oklch(0.6 0.18 250 / 0.05) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, oklch(0.6 0.18 250 / 0.05) 0px, transparent 50%);
 }
 
 @utility no-scrollbar {

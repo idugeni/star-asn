@@ -28,12 +28,17 @@ async def monitor_mass_progress(context: ContextTypes.DEFAULT_TYPE, chat_id, mes
                 continue
 
             label = "PRESENSI MASUK" if action.lower() == "in" else "PRESENSI PULANG"
+            is_aborted = store.is_mass_stop_requested()
+            status_icon = "🛑" if is_aborted else "✅"
+            status_title = "ABORTED" if is_aborted else "COMPLETED"
+            status_code = "EMERGENCY_STOP" if is_aborted else "SUCCESSFUL_SHUTDOWN"
+
             final_msg = (
-                f"✅ <b>MASS {label} COMPLETED</b>\n────────────────\n"
+                f"{status_icon} <b>MASS {label} {status_title}</b>\n────────────────\n"
                 f"📊 <b>Total Processed:</b> <code>{status.get('pos', '0')} / {status.get('total', '0')}</code>\n"
                 f"⏱ <b>Total Duration:</b> <code>{time.time() - start_time:.1f}s</code>\n"
                 f"────────────────\n"
-                f"Status: <code>SUCCESSFUL_SHUTDOWN</code>"
+                f"Status: <code>{status_code}</code>"
             )
             try:
                 await context.bot.edit_message_text(
@@ -74,12 +79,16 @@ async def monitor_mass_progress(context: ContextTypes.DEFAULT_TYPE, chat_id, mes
 
         if msg != last_text:
             try:
-                from telegram import InlineKeyboardMarkup
+                from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+                keyboard = [
+                    [InlineKeyboardButton("🛑 BATALKAN PROSES", callback_data="trigger_stop")],
+                    [get_back_button()]
+                ]
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=msg,
-                    reply_markup=InlineKeyboardMarkup([[get_back_button()]]),
+                    reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode=constants.ParseMode.HTML
                 )
                 last_text = msg

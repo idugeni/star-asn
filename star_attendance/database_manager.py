@@ -1323,6 +1323,7 @@ class SupabaseManager:
 
     def trigger_mass_stop(self) -> None:
         self.set_setting("mass_stop", "1")
+        self.set_setting("mass_active", "0")
 
     def clear_mass_stop(self) -> None:
         self.set_setting("mass_stop", "0")

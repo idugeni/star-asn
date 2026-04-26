@@ -3,6 +3,7 @@ import os
 import psutil
 import socket
 import time
+import html
 from datetime import datetime, timedelta
 
 from collections.abc import Mapping
@@ -40,41 +41,34 @@ def format_source(source: str | None) -> str:
 
 
 def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
+    def esc(v: Any) -> str:
+        return html.escape(str(v or "-"), quote=False)
+
     header = f"<b>🛡️ {settings.BOT_NAME} DASHBOARD UTAMA</b>"
     if user:
         last_actions = store.get_last_success_actions(str(user["nip"]))
         last_in_str = format_formal_timestamp(last_actions.get("in")) if last_actions.get("in") else "BELUM ADA"
         last_out_str = format_formal_timestamp(last_actions.get("out")) if last_actions.get("out") else "BELUM ADA"
         telegram_id = user.get("telegram_id") or "-"
-        auto_status = "AKTIF" if user.get("auto_attendance_active") else "NONAKTIF"
-        in_source = str(user.get("cron_in_source", "-")).upper()
-        out_source = str(user.get("cron_out_source", "-")).upper()
+        auto_status = "🟢 AKTIF" if user.get("auto_attendance_active") else "🔴 NONAKTIF"
         
-        in_label = ""
-        out_label = ""
-
         body = (
             "👤 <b>PROFIL DIGITAL ASN</b>\n"
-            f"  ├ NAMA: <code>{user['nama']}</code>\n"
-            f"  ├ NIP: <code>{user['nip']}</code>\n"
-            f"  ├ TELEGRAM ID: <code>{telegram_id}</code>\n"
-            f"  ├ PANGKAT: <code>{user.get('pangkat') or '-'}</code>\n"
-            f"  ├ JABATAN: <code>{user.get('jabatan') or '-'}</code>\n"
-            f"  ├ DIVISI: <code>{user.get('divisi') or '-'}</code>\n"
-            f"  ├ EMAIL: <code>{user.get('email') or '-'}</code>\n"
-            f"  └ UNIT: <code>{user.get('nama_upt', 'CLUSTER DEFAULT')}</code>\n\n"
-            "⏰ <b>JADWAL ABSENSI OTOMATIS</b>\n"
-            f"  ├ JAM MASUK: <code>{user['cron_in']}</code>{in_label}\n"
-            f"  ├ JAM PULANG: <code>{user['cron_out']}</code>{out_label}\n"
-            f"  ├ HARI KERJA: <code>{user.get('workdays_label', '-')}</code>\n"
-            f"  ├ STATUS AKUN: <code>{'AKTIF' if user.get('is_active', True) else 'NONAKTIF'}</code>\n"
-            f"  ├ AUTO ABSEN: <code>{auto_status}</code>\n"
-            f"  └ INFO: <code>{user.get('auto_attendance_reason', '-')}</code>\n\n"
-            "📍 <b>LOKASI ABSENSI</b>\n"
-            f"  ├ SUMBER: <code>{format_source(str(user.get('location_source')))}</code>\n"
-            f"  ├ NAMA LOKASI: <code>{user.get('location_label', user.get('nama_upt', '-'))}</code>\n"
-            f"  └ KOORDINAT GPS: <code>{format_coords(user)}</code>\n\n"
-            "📊 <b>RIWAYAT TERAKHIR</b>\n"
+            f"  ├ NAMA: <code>{esc(user['nama'])}</code>\n"
+            f"  ├ NIP: <code>{esc(user['nip'])}</code>\n"
+            f"  ├ TELEGRAM ID: <code>{esc(telegram_id)}</code>\n"
+            f"  ├ JABATAN: <code>{esc(user.get('jabatan'))}</code>\n"
+            f"  └ UNIT: <code>{esc(user.get('nama_upt'))}</code>\n\n"
+            "⏰ <b>OTOMATISASI PRESENSI</b>\n"
+            f"  ├ JADWAL: <code>{esc(user['cron_in'])}</code> - <code>{esc(user['cron_out'])}</code>\n"
+            f"  ├ HARI KERJA: <code>{esc(user.get('workdays_label'))}</code>\n"
+            f"  ├ STATUS AUTO: {auto_status}\n"
+            f"  └ KETERANGAN: <i>{esc(user.get('auto_attendance_reason'))}</i>\n\n"
+            "📍 <b>TITIK LOKASI</b>\n"
+            f"  ├ SUMBER: <code>{esc(format_source(str(user.get('location_source'))))}</code>\n"
+            f"  ├ NAMA: <code>{esc(user.get('location_label'))}</code>\n"
+            f"  └ GPS: <code>{esc(format_coords(user))}</code>\n\n"
+            "📊 <b>AKTIVITAS TERAKHIR</b>\n"
             f"  ├ TERAKHIR MASUK: <code>{last_in_str}</code>\n"
             f"  └ TERAKHIR PULANG: <code>{last_out_str}</code>"
         )
@@ -83,8 +77,8 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
 
     footer = (
         "────────────────\n"
-        f"💎 <b>STATUS:</b> ENTERPRISE PREMIUM\n"
-        f"⚡ <b>UPDATED:</b> <code>{format_formal_timestamp()}</code>"
+        f"💎 <b>EDITION:</b> {settings.BOT_EDITION}\n"
+        f"⚡ <b>SYNCED:</b> <code>{format_formal_timestamp()}</code>"
     )
     return f"{header}\n────────────────\n{body}\n{footer}"
 

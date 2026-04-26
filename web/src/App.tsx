@@ -48,7 +48,13 @@ export default function App() {
     };
 
     useEffect(() => {
-        initAuth();
+        let cleanup: (() => void) | undefined;
+        initAuth().then(res => {
+            if (typeof res === 'function') cleanup = res;
+        });
+        return () => {
+            if (cleanup) cleanup();
+        };
     }, []);
 
     async function initAuth() {
@@ -96,7 +102,7 @@ export default function App() {
             const successCountQuery = supabase
                 .from('audit_logs')
                 .select('*', { count: 'exact', head: true })
-                .eq('status', 'SUCCESS');
+                .in('status', ['success', 'ok']);
             
             if (data.role !== 'admin') {
                 successCountQuery.eq('nip', data.nip);
@@ -104,24 +110,78 @@ export default function App() {
             
             const { count } = await successCountQuery;
 
-            // Generate Heatmap Data (Last 30 Days)
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            // Generate Heatmap Data (Last 364 Days / 52 Weeks)
+            const totalDays = 52 * 7;
+            const oneYearAgo = new Date();
+            oneYearAgo.setDate(oneYearAgo.getDate() - totalDays);
             
-            const { data: activity } = await supabase
+            let activityQuery = supabase
                 .from('audit_logs')
                 .select('timestamp')
-                .eq('nip', data.nip)
-                .gte('timestamp', thirtyDaysAgo.toISOString());
+                .gte('timestamp', oneYearAgo.toISOString());
             
-            const activityMap = new Array(30).fill(0);
+            // Only filter by NIP if NOT admin (Admin sees system-wide pulses)
+            if (data.role !== 'admin') {
+                activityQuery = activityQuery.eq('nip', data.nip);
+            }
+            
+            const { data: activity, error: activityError } = await activityQuery;
+            if (activityError) console.error('ACTIVITY_QUERY_ERR:', activityError);
+            
+            const activityMap = new Array(totalDays).fill(0);
+            const now = new Date();
+            now.setHours(0, 0, 0, 0);
+
+            let logsCount = 0;
             activity?.forEach(log => {
-                const dayDiff = Math.floor((new Date().getTime() - new Date(log.timestamp).getTime()) / (1000 * 3600 * 24));
-                if (dayDiff < 30) activityMap[29 - dayDiff] += 1;
+                const logDate = new Date(log.timestamp);
+                logDate.setHours(0, 0, 0, 0);
+                const dayDiff = Math.round((now.getTime() - logDate.getTime()) / (1000 * 3600 * 24));
+                if (dayDiff >= 0 && dayDiff < totalDays) {
+                    activityMap[totalDays - 1 - dayDiff] += 1;
+                    logsCount++;
+                }
             });
 
             setAttendanceLog(logs || []);
             
+            setStats(s => ({ 
+                ...s, 
+                total: count || 0, 
+                activity: activityMap 
+            }));
+
+            // --- REALTIME SUBSCRIPTION (Isolated & Hardened) ---
+            let channel: any;
+            try {
+                // Use unique channel name to avoid clashing on re-renders
+                channel = supabase
+                    .channel(`rt_audit_${Date.now()}`)
+                    .on('postgres_changes', { 
+                        event: 'INSERT', 
+                        schema: 'public', 
+                        table: 'audit_logs' 
+                    }, (payload) => {
+                        const newLog = payload.new as AttendanceLog;
+                        if (data.role === 'admin' || newLog.nip === data.nip) {
+                            setAttendanceLog(prev => [newLog, ...prev].slice(0, 100));
+                            setStats(s => {
+                                const newActivity = [...s.activity];
+                                if (newActivity.length > 0) {
+                                    newActivity[newActivity.length - 1] += 1;
+                                }
+                                return { ...s, activity: newActivity, total: s.total + 1 };
+                            });
+                            if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+                            toast.info(`SYSTEM_SIGNAL: ${newLog.action}`, { icon: '📡' });
+                        }
+                    })
+                    .subscribe();
+            } catch (rtErr) {
+                console.error('Realtime Sync Error:', rtErr);
+                // Don't crash the whole app if realtime fails
+            }
+
             // Poll Kernel Data (FastAPI /healthz)
             const fetchKernel = async () => {
                 try {
@@ -130,13 +190,11 @@ export default function App() {
                     const health = await res.json();
                     setStats(s => ({
                         ...s,
-                        total: count || 0,
-                        activity: activityMap,
                         uptime: health.status === 'ok' ? 'ONLINE' : 'DEGRADED',
                         clusters: health.scheduler_jobs || s.clusters
                     }));
                 } catch {
-                    setStats(s => ({ ...s, total: count || 0, activity: activityMap }));
+                    // Fail silently
                 }
             };
             
@@ -158,8 +216,15 @@ export default function App() {
             }
             
             setLoading(false);
-            return () => clearInterval(interval);
-            toast.success(`Selamat datang, ${data.nama}`);
+            
+            if (data?.nama) {
+                toast.success(`Selamat datang, ${data.nama}`);
+            }
+
+            return () => {
+                supabase.removeChannel(channel);
+                clearInterval(interval);
+            };
         } catch (err) {
             console.error(err);
             setError('System Error. Please contact support.');
@@ -182,7 +247,7 @@ export default function App() {
                         animate="animate"
                         exit="exit"
                         transition={{ duration: 0.3 }}
-                        className="max-w-md mx-auto w-full min-h-full px-6 flex flex-col justify-center py-12"
+                        className="max-w-[480px] mx-auto w-full min-h-full px-1 flex flex-col justify-start pt-6 pb-6"
                     >
                         {error ? (
                             <AuthError error={error} />
@@ -204,8 +269,8 @@ export default function App() {
                             />
                         )}
                         
-                        {/* Space for fixed bottom nav */}
-                        <div className="h-24 flex-shrink-0" />
+                        {/* Finely tuned space for fixed bottom nav */}
+                        <div className="h-20 flex-shrink-0" />
                     </motion.main>
                 </AnimatePresence>
             </div>

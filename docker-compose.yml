@@ -23,16 +23,6 @@ x-service-defaults: &star-asn-service
       max-file: "3"
 
 services:
-  bootstrap:
-    <<: *star-asn-service
-    container_name: star-asn-bootstrap
-    environment:
-      <<: *star-asn-runtime-env
-    command: ["bootstrap"]
-    deploy:
-      restart_policy:
-        condition: none
-
   api:
     <<: *star-asn-service
     container_name: star-asn-api
@@ -42,15 +32,13 @@ services:
       INTERNAL_API_HEALTHCHECK_URL: http://127.0.0.1:11800
     ports:
       - "127.0.0.1:11800:11800"
-    command: ["api"]
+    command: ["api-full"]
     deploy:
       restart_policy:
         condition: on-failure
         delay: 5s
         max_attempts: 3
         window: 120s
-    depends_on:
-      - bootstrap
     healthcheck:
       test: ["CMD", "python", "-m", "star_attendance.service_runner", "check-api"]
       start_period: 30s
@@ -72,8 +60,8 @@ services:
         max_attempts: 3
         window: 120s
     depends_on:
-      - bootstrap
-      - api
+      api:
+        condition: service_healthy
 
   bot:
     <<: *star-asn-service
@@ -89,9 +77,43 @@ services:
         max_attempts: 3
         window: 120s
     depends_on:
-      - bootstrap
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: star-asn-web
+    ports:
+      - "11080:80"
+    restart: unless-stopped
+    depends_on:
       - api
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: star-asn-portainer
+    ports:
+      - "11900:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    container_name: star-asn-uptime
+    ports:
+      - "11301:3001"
+    volumes:
+      - uptime_data:/app/data
+    restart: unless-stopped
 
 networks:
   default:
     name: star-asn-network
+
+volumes:
+  portainer_data:
+  uptime_data:

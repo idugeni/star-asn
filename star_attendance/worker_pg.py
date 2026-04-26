@@ -30,6 +30,10 @@ async def main():
 
     @pq.entrypoint("attendance.process")
     async def process_task(job):
+        if store.is_mass_stop_requested():
+            logger.warning("Task skipped due to mass stop signal.")
+            return
+
         payload = decode_queue_payload(job.payload)
         nip = payload.get("nip")
         action = payload.get("action", "in")

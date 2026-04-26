@@ -25,36 +25,36 @@ export const BottomNav = ({ isAdmin, activeTab, onTabChange }: BottomNavProps) =
           ];
 
     return (
-        <nav className="fixed bottom-8 left-0 right-0 z-50 flex justify-center px-4">
-            <div className="glass shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-white/5 flex justify-around items-center py-4 px-8 rounded-[32px] w-full max-w-sm relative">
-                <div className="absolute inset-0 bg-primary/5 blur-2xl rounded-full -z-10" />
+        <nav className="fixed bottom-6 left-0 right-0 z-50 flex justify-center px-8">
+            <div className="glass-premium shadow-[0_15px_40px_rgba(0,0,0,0.5)] border-white/10 flex justify-around items-center py-2.5 px-6 rounded-[28px] w-full max-w-[320px] relative overflow-hidden group">
+                <div className="absolute inset-0 bg-primary/5 blur-[30px] rounded-full -z-10 group-hover:bg-primary/10 transition-colors" />
                 {items.map((item) => {
                     const isActive = activeTab === item.id;
                     return (
                         <motion.button 
                             key={item.id} 
                             onClick={() => onTabChange(item.id)}
-                            whileHover={{ y: -5 }}
-                            whileTap={{ scale: 0.9, y: 0 }}
+                            whileHover={{ y: -3, scale: 1.1 }}
+                            whileTap={{ scale: 0.95, y: 0 }}
                             className={cn(
-                                "flex flex-col items-center gap-1.5 relative group outline-none cursor-pointer",
-                                isActive ? "text-primary" : "text-slate-600 hover:text-slate-400"
+                                "flex flex-col items-center gap-1 relative group outline-none cursor-pointer min-w-[45px]",
+                                isActive ? "text-primary" : "text-slate-500 hover:text-slate-300"
                             )}
                         >
                             <item.icon className={cn(
-                                "h-7 w-7 transition-all duration-300", 
-                                isActive ? "drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" : "group-hover:opacity-100"
+                                "h-4.5 w-4.5 transition-all duration-300", 
+                                isActive ? "drop-shadow-[0_0_10px_rgba(59,130,246,0.8)] scale-110" : "group-hover:opacity-100"
                             )} />
                             <span className={cn(
-                                "text-[8px] font-black uppercase tracking-[0.2em] transition-all",
-                                isActive ? "opacity-100" : "opacity-40 group-hover:opacity-100"
+                                "text-[6px] font-black uppercase tracking-[0.2em] transition-all",
+                                isActive ? "opacity-100 text-glow" : "opacity-30 group-hover:opacity-100"
                             )}>
                                 {item.label}
                             </span>
                             {isActive && (
                                 <motion.div 
                                     layoutId="nav-dot"
-                                    className="absolute -bottom-1.5 w-1 h-1 bg-primary rounded-full shadow-[0_0_8px_rgba(59,130,246,0.8)]"
+                                    className="absolute -bottom-1.5 w-1 h-1 bg-primary rounded-full shadow-[0_0_10px_rgba(59,130,246,1)]"
                                 />
                             )}
                         </motion.button>

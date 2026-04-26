@@ -17,7 +17,9 @@ logger.setLevel(getattr(logging, settings.LOG_LEVEL))
 
 class AttendanceScheduler:
     def __init__(self, store: SupabaseManager):
-        self.scheduler = AsyncIOScheduler()
+        db_settings = store.get_settings()
+        self.tz = self._resolve_timezone(db_settings.get("timezone"))
+        self.scheduler = AsyncIOScheduler(timezone=self.tz)
         self.store = store
         self.is_running = False
 
@@ -44,10 +46,9 @@ class AttendanceScheduler:
         Iterates through all database users and registers their personal cron jobs.
         """
         db_settings = self.store.get_settings()
-        scheduler_tz = self._resolve_timezone(db_settings.get("timezone"))
         automation_enabled = bool(db_settings.get("automation_enabled", True))
         users = self.store.get_users_with_passwords() if automation_enabled else []
-        logger.info(f"Syncing schedules for {len(users)} users in timezone {scheduler_tz}...")
+        logger.info(f"Syncing schedules for {len(users)} users in timezone {self.tz}...")
 
         # Track current jobs to remove stale ones
         current_job_ids = set()
@@ -72,25 +73,29 @@ class AttendanceScheduler:
                 h, m = map(int, cron_in.split(":"))
                 self.scheduler.add_job(
                     self.dispatch_user_task,
-                    CronTrigger(hour=h, minute=m, day_of_week=day_of_week, timezone=scheduler_tz),
+                    CronTrigger(hour=h, minute=m, day_of_week=day_of_week, timezone=self.tz),
                     args=[u, "in"],
                     id=job_id_in,
                     replace_existing=True,
+                    misfire_grace_time=3600,  # 1 hour grace
+                    coalesce=True,
                 )
                 current_job_ids.add(job_id_in)
             except Exception as e:
                 logger.error(f"Failed to schedule IN for {pin}: {e}")
-
+ 
             # Setup Personal OUT
             job_id_out = f"user_{pin}_out"
             try:
                 h, m = map(int, cron_out.split(":"))
                 self.scheduler.add_job(
                     self.dispatch_user_task,
-                    CronTrigger(hour=h, minute=m, day_of_week=day_of_week, timezone=scheduler_tz),
+                    CronTrigger(hour=h, minute=m, day_of_week=day_of_week, timezone=self.tz),
                     args=[u, "out"],
                     id=job_id_out,
                     replace_existing=True,
+                    misfire_grace_time=3600,  # 1 hour grace
+                    coalesce=True,
                 )
                 current_job_ids.add(job_id_out)
             except Exception as e:
