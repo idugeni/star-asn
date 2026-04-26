@@ -247,7 +247,7 @@ export default function App() {
                         animate="animate"
                         exit="exit"
                         transition={{ duration: 0.3 }}
-                        className="max-w-[480px] mx-auto w-full min-h-full px-1 flex flex-col justify-start pt-6 pb-6"
+                        className="max-w-[480px] mx-auto w-full min-h-full px-6 flex flex-col justify-start pt-6 pb-6"
                     >
                         {error ? (
                             <AuthError error={error} />

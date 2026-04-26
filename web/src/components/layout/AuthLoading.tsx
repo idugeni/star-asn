@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 
 
 export const AuthLoading = () => (
-    <div className="flex flex-col items-center justify-center min-h-[50vh] w-full relative">
+    <div className="flex flex-col items-center justify-center h-screen w-full relative bg-background">
         {/* Background Atmosphere */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-blue-600/5 blur-[120px] rounded-full" />
         
