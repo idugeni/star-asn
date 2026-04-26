@@ -513,6 +513,12 @@ class SupabaseManager:
                     existing_user.cron_out = str(data["cron_out"])
                 if "is_active" in data:
                     existing_user.is_active = bool(data["is_active"])
+                
+                # Sync extended fields
+                for field in ["jabatan", "divisi", "pangkat", "email", "sso_sub", "birth_date", "birth_place"]:
+                    if field in data and data.get(field):
+                        setattr(existing_user, field, data[field])
+
                 session.add(existing_user)
             else:
                 session.add(
@@ -531,6 +537,14 @@ class SupabaseManager:
                         workdays=normalize_workdays(data.get("workdays"), str(db_settings["default_workdays"]))
                         if data.get("workdays") not in (None, "")
                         else None,
+                        # Sync extended fields
+                        jabatan=data.get("jabatan"),
+                        divisi=data.get("divisi"),
+                        pangkat=data.get("pangkat"),
+                        email=data.get("email"),
+                        sso_sub=data.get("sso_sub"),
+                        birth_date=data.get("birth_date"),
+                        birth_place=data.get("birth_place"),
                     )
                 )
 

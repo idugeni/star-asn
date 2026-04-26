@@ -27,6 +27,7 @@ from .handler_views import (
     get_global_settings_keyboard,
 )
 from .ui import get_upt_keyboard, is_admin
+from star_attendance.sso_handler import sync_sso_data
 
 internal_api = get_internal_api_client()
 
@@ -311,10 +312,16 @@ async def admin_add_nip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if not update.message or not update.message.text:
         return WAIT_ADMIN_ADD_NIP
     user_cache = cast(dict[str, Any], context.user_data)
-    user_cache["admin_add_nip"] = update.message.text
+    try:
+        nip = validate_nip(update.message.text)
+        user_cache["admin_add_nip"] = nip
+    except Exception as exc:
+        await update.message.reply_text(f"❌ NIP tidak valid: {exc}")
+        return WAIT_ADMIN_ADD_NIP
+
     await update.message.reply_text(
         "🔑 <b>PASSWORD PORTAL</b>\n────────────────\n"
-        f"NIP <code>{update.message.text}</code> diterima.\n"
+        f"NIP <code>{user_cache['admin_add_nip']}</code> diterima.\n"
         "Sekarang masukkan <b>PASSWORD</b> portal absensi untuk personel ini:",
         parse_mode="HTML",
     )
@@ -325,12 +332,58 @@ async def admin_add_pass(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not update.message or not update.message.text:
         return WAIT_ADMIN_ADD_PASS
     user_cache = cast(dict[str, Any], context.user_data)
-    user_cache["admin_add_pass"] = update.message.text
-    await update.message.reply_text(
-        "👤 <b>NAMA LENGKAP</b>\n────────────────\nPassword tersimpan. Masukkan <b>NAMA LENGKAP</b> personel ini:",
+    nip = user_cache.get("admin_add_nip")
+    password = update.message.text
+    user_cache["admin_add_pass"] = password
+
+    # Perform SSO Sync
+    status_msg = await update.message.reply_text(
+        "🔍 <b>SINKRONISASI SSO</b>\n────────────────\n"
+        "Menghubungkan ke server demo-sso...",
         parse_mode="HTML",
     )
-    return WAIT_ADMIN_ADD_NAME
+
+    async def on_progress(msg: str):
+        try:
+            await status_msg.edit_text(
+                f"🔍 <b>SINKRONISASI SSO</b>\n────────────────\n{msg}",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+    res = await sync_sso_data(nip, password, on_progress=on_progress)
+
+    if res["status"] == "success":
+        profile = res["data"]
+        user_cache["admin_add_name"] = profile.get("nama")
+        user_cache["admin_add_upt"] = profile.get("nama_upt")
+        # Store extra fields
+        user_cache["admin_add_jabatan"] = profile.get("jabatan")
+        user_cache["admin_add_divisi"] = profile.get("divisi")
+        user_cache["admin_add_pangkat"] = profile.get("pangkat")
+        user_cache["admin_add_email"] = profile.get("email")
+        user_cache["admin_add_sso_sub"] = profile.get("sso_sub")
+        user_cache["admin_add_birth_date"] = profile.get("birth_date")
+        user_cache["admin_add_birth_place"] = profile.get("birth_place")
+
+        await status_msg.edit_text(
+            f"✅ <b>DATA TERVERIFIKASI</b>\n────────────────\n"
+            f"👤 <b>Nama:</b> <code>{profile.get('nama')}</code>\n"
+            f"🏢 <b>UPT:</b> <code>{profile.get('nama_upt')}</code>\n\n"
+            "Data otomatis disinkronkan. Melanjutkan ke pengaturan jadwal...",
+            parse_mode="HTML",
+        )
+        # Skip WAIT_ADMIN_ADD_NAME and WAIT_ADMIN_ADD_UPT, go to admin_add_upt logic
+        return await admin_add_upt(update, context)
+    else:
+        await status_msg.edit_text(
+            f"❌ <b>GAGAL SINKRONISASI</b>\n────────────────\n"
+            f"Pesan: {res.get('message')}\n\n"
+            "Pastikan NIP dan Password SSO benar, lalu kirim ulang password:",
+            parse_mode="HTML",
+        )
+        return WAIT_ADMIN_ADD_PASS
 
 
 async def admin_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -358,7 +411,7 @@ async def admin_add_upt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await query.answer()
         data = query.data or ""
         user_cache["admin_add_upt"] = data.replace("add_upt_", "")
-    else:
+    elif not user_cache.get("admin_add_upt"):
         if not update.message or not update.message.text:
             return WAIT_ADMIN_ADD_UPT
         user_cache["admin_add_upt"] = update.message.text
@@ -499,9 +552,6 @@ async def admin_add_loc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     raw_schedule = str(user_cache.get("admin_add_schedule", "SISTEM"))
     raw_workdays = str(user_cache.get("admin_add_workdays", "GLOBAL"))
 
-    msg_text = update.message.text if update.message else None
-    raw_loc = msg_text or "DEFAULT"
-
     from .conversation_shared import parse_coordinates, parse_schedule_range, parse_workdays
 
     cin, cout = (None, None)
@@ -536,6 +586,13 @@ async def admin_add_loc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         "personal_latitude": lat,
         "personal_longitude": lon,
         "telegram_id": None,
+        "jabatan": user_cache.get("admin_add_jabatan"),
+        "divisi": user_cache.get("admin_add_divisi"),
+        "pangkat": user_cache.get("admin_add_pangkat"),
+        "email": user_cache.get("admin_add_email"),
+        "sso_sub": user_cache.get("admin_add_sso_sub"),
+        "birth_date": user_cache.get("admin_add_birth_date"),
+        "birth_place": user_cache.get("admin_add_birth_place"),
     }
 
     if store.add_user(user_data) and update.message:
