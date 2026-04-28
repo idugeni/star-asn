@@ -3,6 +3,8 @@ import logging
 import re
 from typing import Any, Dict, Optional
 
+from star_attendance.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Indonesian government institution prefixes that confuse geocoding
@@ -125,12 +127,41 @@ async def _nominatim_search(client: httpx.AsyncClient, query: str) -> Optional[D
     return None
 
 
+async def _goapi_search(client: httpx.AsyncClient, query: str) -> Optional[Dict[str, Any]]:
+    """Search GoAPI Places — free, Indonesia-optimized place search.
+
+    Returns the first matching place with coordinates.
+    Requires GOAPI_KEY in settings.
+    """
+    api_key = getattr(settings, "GOAPI_KEY", None)
+    if not api_key:
+        return None
+    params = {"search": query, "api_key": api_key}
+    response = await client.get(
+        "https://api.goapi.io/places",
+        params=params,
+        timeout=10,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("status") == "success":
+        results = data.get("data", {}).get("results", [])
+        if results:
+            place = results[0]
+            lat = float(place["lat"])
+            lng = float(place["lng"])
+            addr = place.get("displayName", "")
+            return _make_result("", lat, lng, addr)
+    return None
+
+
 async def resolve_upt_coordinates(upt_name: str) -> Optional[Dict[str, Any]]:
     """
     Resolve coordinates for a UPT name using multi-strategy geocoding.
 
-    Strategy: OpenStreetMap Nominatim with progressively simplified queries
-    (original name → strip prefixes → remove classification → city name only)
+    Strategy order:
+    1. GoAPI Places (free, Indonesia-optimized) with all variants
+    2. OpenStreetMap Nominatim with progressively simplified queries
 
     Returns a dict with latitude, longitude, and address or None if not found.
     """
@@ -141,7 +172,18 @@ async def resolve_upt_coordinates(upt_name: str) -> Optional[Dict[str, Any]]:
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            # Strategy 1: Nominatim with all variants
+            # Strategy 1: GoAPI Places (Indonesia-optimized, free)
+            for query in variants:
+                try:
+                    result = await _goapi_search(client, query)
+                    if result:
+                        result["nama_upt"] = upt_name
+                        logger.info(f"Geocoded '{upt_name}' via GoAPI query '{query}' → {result['latitude']}, {result['longitude']}")
+                        return result
+                except Exception:
+                    continue
+
+            # Strategy 2: Nominatim fallback
             for query in variants:
                 try:
                     result = await _nominatim_search(client, query)
@@ -151,7 +193,6 @@ async def resolve_upt_coordinates(upt_name: str) -> Optional[Dict[str, Any]]:
                         return result
                 except Exception:
                     continue
-
 
     except Exception as e:
         logger.error(f"Geocoding Error for {upt_name}: {e}")
@@ -166,11 +207,36 @@ def resolve_upt_coordinates_sync(upt_name: str) -> Optional[Dict[str, Any]]:
         return None
 
     variants = _build_search_variants(upt_name)
-    headers = {"User-Agent": "Star-ASN-Enterprise/2.0 (Contact: admin@star-asn.local)"}
 
     try:
         with httpx.Client(timeout=10) as client:
-            # Strategy 1: Nominatim with all variants
+            # Strategy 1: GoAPI Places (Indonesia-optimized, free)
+            api_key = getattr(settings, "GOAPI_KEY", None)
+            if api_key:
+                for query in variants:
+                    try:
+                        params = {"search": query, "api_key": api_key}
+                        response = client.get(
+                            "https://api.goapi.io/places",
+                            params=params,
+                            timeout=10,
+                        )
+                        data = response.json()
+                        if data.get("status") == "success":
+                            results = data.get("data", {}).get("results", [])
+                            if results:
+                                place = results[0]
+                                lat = float(place["lat"])
+                                lng = float(place["lng"])
+                                addr = place.get("displayName", "")
+                                result = _make_result(upt_name, lat, lng, addr)
+                                logger.info(f"Geocoded '{upt_name}' via GoAPI query '{query}' → {result['latitude']}, {result['longitude']}")
+                                return result
+                    except Exception:
+                        continue
+
+            # Strategy 2: Nominatim fallback
+            headers = {"User-Agent": "Star-ASN-Enterprise/2.0 (Contact: admin@star-asn.local)"}
             for query in variants:
                 try:
                     params: dict[str, str | int] = {

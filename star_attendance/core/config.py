@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     PROXY_PASSWORD: str | None = None
     PROXY_ENABLED: bool = False  # Master switch — set to true to activate proxy
 
+    # --- GEOCODING ---
+    GOAPI_KEY: str | None = None  # GoAPI.io Places API key (free tier available)
+
     # --- LOGGING ---
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "console"  # "console" or "json" for Loki/Grafana
