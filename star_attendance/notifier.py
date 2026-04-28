@@ -428,7 +428,7 @@ class TelegramNotifier:
                 # We could also use f"last_msg_group_{nip}" for per-user cleanup,
                 # but "only 1 latest" globally is cleaner for high-volume clusters.
                 cleanup_key = "last_telemetry_msg_id"
-                last_id_str = store.get_setting(cleanup_key)
+                last_id_str = store.get_settings().get(cleanup_key)
                 
                 if last_id_str and last_id_str.isdigit():
                     self.delete_message(self.log_group_id, int(last_id_str))

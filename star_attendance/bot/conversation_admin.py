@@ -336,6 +336,10 @@ async def admin_add_pass(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     password = update.message.text
     user_cache["admin_add_pass"] = password
 
+    if not nip:
+        await update.message.reply_text("❌ NIP tidak ditemukan. Mulai ulang dari /tambah.")
+        return ConversationHandler.END
+
     # Perform SSO Sync
     status_msg = await update.message.reply_text(
         "🔍 <b>SINKRONISASI SSO</b>\n────────────────\n"
@@ -352,7 +356,7 @@ async def admin_add_pass(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         except Exception:
             pass
 
-    res = await sync_sso_data(nip, password, on_progress=on_progress)
+    res = await sync_sso_data(str(nip), password, on_progress=on_progress)
 
     if res["status"] == "success":
         profile = res["data"]

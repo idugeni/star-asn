@@ -17,7 +17,7 @@ async def resolve_upt_coordinates(upt_name: str) -> Optional[Dict[str, Any]]:
     search_query = upt_name.strip()
     
     # We add "Indonesia" to the query to ensure we get results in the right region
-    params = {
+    params: dict[str, str | int] = {
         "q": f"{search_query}, Indonesia",
         "format": "json",
         "limit": 1
@@ -68,7 +68,7 @@ def resolve_upt_coordinates_sync(upt_name: str) -> Optional[Dict[str, Any]]:
         return None
         
     search_query = upt_name.strip()
-    params = {
+    params: dict[str, str | int] = {
         "q": f"{search_query}, Indonesia",
         "format": "json",
         "limit": 1

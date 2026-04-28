@@ -220,7 +220,7 @@ async def healthz() -> HealthzResponse:
                 "status": "degraded",
                 "database": "schema_error",
                 "error": f"Schema validation failed: {exc}",
-                "scheduler_running": scheduler.scheduler.running,
+                "scheduler_running": scheduler.is_running,
             },
         ) from exc
 

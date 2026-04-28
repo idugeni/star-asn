@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from typing import Any, cast
 
 from sqlalchemy import func
