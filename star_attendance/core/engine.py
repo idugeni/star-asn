@@ -71,7 +71,7 @@ class AttendanceEngine:
             impersonate="chrome131",
             verify=False,
             timeout=20,
-            proxies={"http": self.proxy, "https": self.proxy} if self.proxy else None,
+            proxy=self.proxy,
         )
 
         # Master Identity Synchronization

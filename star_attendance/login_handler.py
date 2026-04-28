@@ -849,8 +849,18 @@ class LoginHandler:
                     ],
                 }
                 # Pass proxy to Chromium if configured (Bright Data / custom)
+                # Playwright requires separate server/username/password fields
                 if self.proxy:
-                    launch_opts["proxy"] = {"server": self.proxy}
+                    from urllib.parse import urlparse
+                    parsed = urlparse(self.proxy)
+                    proxy_config: dict[str, str] = {
+                        "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
+                    }
+                    if parsed.username:
+                        proxy_config["username"] = parsed.username
+                    if parsed.password:
+                        proxy_config["password"] = parsed.password
+                    launch_opts["proxy"] = proxy_config
 
                 browser = await p.chromium.launch(**launch_opts)
                 context = await browser.new_context(
