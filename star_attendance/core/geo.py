@@ -3,8 +3,6 @@ import logging
 import re
 from typing import Any, Dict, Optional
 
-from star_attendance.core.config import settings
-
 logger = logging.getLogger(__name__)
 
 # Indonesian government institution prefixes that confuse geocoding
@@ -127,58 +125,12 @@ async def _nominatim_search(client: httpx.AsyncClient, query: str) -> Optional[D
     return None
 
 
-async def _google_maps_search(client: httpx.AsyncClient, query: str) -> Optional[Dict[str, Any]]:
-    """Search Google Places API (New) Text Search — finds places by name.
-
-    Requires GOOGLE_MAPS_API_KEY with Places API (New) enabled.
-    Uses the v1 Text Search endpoint which is better for institution names
-    than the legacy Geocoding API.
-    """
-    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", None)
-    if not api_key:
-        return None
-
-    # Places API (New) — Text Search
-    headers = {
-        "X-Goog-Api-Key": api_key,
-        "Content-Type": "application/json",
-    }
-    body = {
-        "textQuery": f"{query}, Indonesia",
-    }
-    # Request only the fields we need (FieldMask controls billing)
-    params = {"fields": "places.location,places.formattedAddress"}
-
-    response = await client.post(
-        "https://places.googleapis.com/v1/places:searchText",
-        headers=headers,
-        params=params,
-        json=body,
-        timeout=10,
-    )
-    response.raise_for_status()
-    data = response.json()
-
-    places = data.get("places", [])
-    if places:
-        place = places[0]
-        loc = place.get("location", {})
-        lat = loc.get("latitude")
-        lng = loc.get("longitude")
-        addr = place.get("formattedAddress", "")
-        if lat is not None and lng is not None:
-            return _make_result("", float(lat), float(lng), addr)
-    return None
-
-
 async def resolve_upt_coordinates(upt_name: str) -> Optional[Dict[str, Any]]:
     """
     Resolve coordinates for a UPT name using multi-strategy geocoding.
 
-    Strategy order:
-    1. OpenStreetMap Nominatim with progressively simplified queries
-    2. Google Places API (New) Text Search (if GOOGLE_MAPS_API_KEY is configured)
-    3. City-name-only fallback via Nominatim
+    Strategy: OpenStreetMap Nominatim with progressively simplified queries
+    (original name → strip prefixes → remove classification → city name only)
 
     Returns a dict with latitude, longitude, and address or None if not found.
     """
@@ -200,16 +152,6 @@ async def resolve_upt_coordinates(upt_name: str) -> Optional[Dict[str, Any]]:
                 except Exception:
                     continue
 
-            # Strategy 2: Google Places API (New) Text Search
-            for query in variants:
-                try:
-                    result = await _google_maps_search(client, query)
-                    if result:
-                        result["nama_upt"] = upt_name
-                        logger.info(f"Geocoded '{upt_name}' via Google Places query '{query}' → {result['latitude']}, {result['longitude']}")
-                        return result
-                except Exception:
-                    continue
 
     except Exception as e:
         logger.error(f"Geocoding Error for {upt_name}: {e}")
@@ -254,39 +196,6 @@ def resolve_upt_coordinates_sync(upt_name: str) -> Optional[Dict[str, Any]]:
                         return result
                 except Exception:
                     continue
-
-            # Strategy 2: Google Places API (New) Text Search
-            api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", None)
-            if api_key:
-                gheaders = {
-                    "X-Goog-Api-Key": api_key,
-                    "Content-Type": "application/json",
-                }
-                for query in variants:
-                    try:
-                        body = {"textQuery": f"{query}, Indonesia"}
-                        gparams = {"fields": "places.location,places.formattedAddress"}
-                        response = client.post(
-                            "https://places.googleapis.com/v1/places:searchText",
-                            headers=gheaders,
-                            params=gparams,
-                            json=body,
-                            timeout=10,
-                        )
-                        data = response.json()
-                        places = data.get("places", [])
-                        if places:
-                            place = places[0]
-                            loc = place.get("location", {})
-                            lat = loc.get("latitude")
-                            lng = loc.get("longitude")
-                            addr = place.get("formattedAddress", "")
-                            if lat is not None and lng is not None:
-                                result = _make_result(upt_name, float(lat), float(lng), addr)
-                                logger.info(f"Geocoded '{upt_name}' via Google Places query '{query}' → {result['latitude']}, {result['longitude']}")
-                                return result
-                    except Exception:
-                        continue
 
     except Exception as e:
         logger.error(f"Sync Geocoding Error for {upt_name}: {e}")
