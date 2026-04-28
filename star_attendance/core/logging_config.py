@@ -63,7 +63,7 @@ def configure_structlog(log_level: str = "INFO") -> None:
     # Apply the formatter to the root handler
     formatter = structlog.stdlib.ProcessorFormatter(
         processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processor_meta,
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
             renderer,
         ],
         foreign_pre_chain=shared_processors,
