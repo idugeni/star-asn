@@ -12,12 +12,14 @@ _STRIP_PREFIXES = [
     "KANTOR ", "RUMAH ", "LEMBAGA ", "BADAN ", "DINAS ",
     "INSPEKTORAT ", "SEKRETARIAT ", "BIRO ", "DIREKTORAT ",
 ]
-# Known abbreviation → common name mapping for better geocoding hits
-_ALIAS_MAP: dict[str, str] = {
-    "RUTAN": "RUMAH TAHANAN",
-    "LAPAS": "LEMBAGA PEMASYARAKATAN",
-    "IMIGRASI": "KANTOR IMIGRASI",
-    "KEMENKUMHAM": "KEMENTERIAN HUKUM DAN HAK ASASI MANUSIA",
+# Full name → common abbreviation (and reverse) for better geocoding hits
+_ABBREVIATIONS: dict[str, str] = {
+    "RUMAH TAHANAN": "RUTAN",
+    "LEMBAGA PEMASYARAKATAN": "LAPAS",
+    "KANTOR IMIGRASI": "IMIGRASI",
+    "KEMENTERIAN HUKUM DAN HAK ASASI MANUSIA": "KEMENKUMHAM",
+    "KEMENTERIAN IMIGRASI": "KEMENIMI",
+    "KEMENTERIAN PEMASYARAKATAN": "KEMPAS",
 }
 
 
@@ -46,43 +48,68 @@ def _extract_city_name(upt_name: str) -> str | None:
 
 
 def _build_search_variants(upt_name: str) -> list[str]:
-    """Build a list of progressively simplified search queries for geocoding."""
+    """Build a list of progressively simplified search queries for geocoding.
+
+    Generates variants by: original → abbreviate → expand → strip prefixes →
+    remove classification (KELAS) → combinations. No city-only fallback —
+    we prefer returning None over imprecise city-level coordinates.
+    """
     variants: list[str] = []
     name = upt_name.strip()
+
+    def _replace_abbrevs(text: str, direction: str = "both") -> str:
+        """Replace abbreviations in text. direction: 'shorten', 'expand', or 'both'."""
+        result = text.upper()
+        for full, short in _ABBREVIATIONS.items():
+            if direction in ("shorten", "both") and full in result:
+                result = result.replace(full, short)
+            if direction in ("expand", "both") and short in result:
+                result = result.replace(short, full)
+        return result
 
     # 1. Original name
     variants.append(name)
 
-    # 2. Strip institutional prefixes first (RUMAH, KANTOR, etc.)
+    # 2. Abbreviate full names (RUMAH TAHANAN → RUTAN, LEMBAGA PEMASYARAKATAN → LAPAS)
+    shortened = _replace_abbrevs(name, "shorten")
+    if shortened != name.upper():
+        variants.append(shortened.title())
+
+    # 3. Expand abbreviations (RUTAN → RUMAH TAHANAN, LAPAS → LEMBAGA PEMASYARAKATAN)
+    expanded = _replace_abbrevs(name, "expand")
+    if expanded != name.upper():
+        variants.append(expanded.title())
+
+    # 4. Strip institutional prefixes (RUMAH, KANTOR, etc.)
     stripped = name
     for prefix in _STRIP_PREFIXES:
         stripped = stripped.replace(prefix, "")
     stripped = stripped.strip()
-    if stripped and stripped != name:
+    if stripped and stripped.upper() != name.upper():
         variants.append(stripped)
 
-    # 3. Expand abbreviations (RUTAN → RUMAH TAHANAN, LAPAS → LEMBAGA PEMASYARAKATAN)
-    expanded = name
-    for abbr, full in _ALIAS_MAP.items():
-        if abbr in expanded.upper():
-            expanded = expanded.replace(abbr, full)
-    if expanded != name:
-        variants.append(expanded)
+    # 5. Strip prefixes + abbreviate
+    if stripped:
+        shortened_stripped = _replace_abbrevs(stripped, "shorten")
+        if shortened_stripped != stripped.upper():
+            variants.append(shortened_stripped.title())
 
-    # 4. Strip prefixes + remove classification (KELAS IIB, etc.)
-    no_class = re.sub(r"\bKELAS\s+[IVX]+\b", "", stripped, flags=re.IGNORECASE).strip()
-    if no_class and no_class != stripped:
+    # 6. Remove classification (KELAS IIB, KELAS I, etc.)
+    no_class = re.sub(r"\bKELAS\s+[IVX]+\b", "", name, flags=re.IGNORECASE).strip()
+    if no_class and no_class.upper() != name.upper():
         variants.append(no_class)
 
-    # 5. Strip prefixes + expand abbreviations + remove classification
-    expanded_no_class = re.sub(r"\bKELAS\s+[IVX]+\b", "", expanded, flags=re.IGNORECASE).strip()
-    if expanded_no_class and expanded_no_class != expanded:
-        variants.append(expanded_no_class)
+    # 7. Strip prefixes + remove classification
+    if stripped:
+        no_class_stripped = re.sub(r"\bKELAS\s+[IVX]+\b", "", stripped, flags=re.IGNORECASE).strip()
+        if no_class_stripped and no_class_stripped.upper() != stripped.upper():
+            variants.append(no_class_stripped)
 
-    # 6. Extract city name only (last resort)
-    city = _extract_city_name(name)
-    if city:
-        variants.append(city)
+    # 8. Abbreviate + remove classification
+    if shortened != name.upper():
+        no_class_abbrev = re.sub(r"\bKELAS\s+[IVX]+\b", "", shortened, flags=re.IGNORECASE).strip()
+        if no_class_abbrev and no_class_abbrev.upper() != shortened:
+            variants.append(no_class_abbrev.title())
 
     # Deduplicate while preserving order
     seen: set[str] = set()
@@ -160,8 +187,8 @@ async def resolve_upt_coordinates(upt_name: str) -> Optional[Dict[str, Any]]:
     Resolve coordinates for a UPT name using multi-strategy geocoding.
 
     Strategy order:
-    1. GoAPI Places (free, Indonesia-optimized) with all variants
-    2. OpenStreetMap Nominatim with progressively simplified queries
+    1. OpenStreetMap Nominatim with progressively simplified queries (most complete data)
+    2. GoAPI Places (Indonesia-optimized) with all variants
 
     Returns a dict with latitude, longitude, and address or None if not found.
     """
@@ -172,24 +199,24 @@ async def resolve_upt_coordinates(upt_name: str) -> Optional[Dict[str, Any]]:
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            # Strategy 1: GoAPI Places (Indonesia-optimized, free)
-            for query in variants:
-                try:
-                    result = await _goapi_search(client, query)
-                    if result:
-                        result["nama_upt"] = upt_name
-                        logger.info(f"Geocoded '{upt_name}' via GoAPI query '{query}' → {result['latitude']}, {result['longitude']}")
-                        return result
-                except Exception:
-                    continue
-
-            # Strategy 2: Nominatim fallback
+            # Strategy 1: Nominatim (most complete address data)
             for query in variants:
                 try:
                     result = await _nominatim_search(client, query)
                     if result:
                         result["nama_upt"] = upt_name
                         logger.info(f"Geocoded '{upt_name}' via Nominatim query '{query}' → {result['latitude']}, {result['longitude']}")
+                        return result
+                except Exception:
+                    continue
+
+            # Strategy 2: GoAPI Places (Indonesia-optimized)
+            for query in variants:
+                try:
+                    result = await _goapi_search(client, query)
+                    if result:
+                        result["nama_upt"] = upt_name
+                        logger.info(f"Geocoded '{upt_name}' via GoAPI query '{query}' → {result['latitude']}, {result['longitude']}")
                         return result
                 except Exception:
                     continue
@@ -210,32 +237,8 @@ def resolve_upt_coordinates_sync(upt_name: str) -> Optional[Dict[str, Any]]:
 
     try:
         with httpx.Client(timeout=10) as client:
-            # Strategy 1: GoAPI Places (Indonesia-optimized, free)
+            # Strategy 1: Nominatim (most complete address data)
             api_key = getattr(settings, "GOAPI_KEY", None)
-            if api_key:
-                for query in variants:
-                    try:
-                        params = {"search": query, "api_key": api_key}
-                        response = client.get(
-                            "https://api.goapi.io/places",
-                            params=params,
-                            timeout=10,
-                        )
-                        data = response.json()
-                        if data.get("status") == "success":
-                            results = data.get("data", {}).get("results", [])
-                            if results:
-                                place = results[0]
-                                lat = float(place["lat"])
-                                lng = float(place["lng"])
-                                addr = place.get("displayName", "")
-                                result = _make_result(upt_name, lat, lng, addr)
-                                logger.info(f"Geocoded '{upt_name}' via GoAPI query '{query}' → {result['latitude']}, {result['longitude']}")
-                                return result
-                    except Exception:
-                        continue
-
-            # Strategy 2: Nominatim fallback
             headers = {"User-Agent": "Star-ASN-Enterprise/2.0 (Contact: admin@star-asn.local)"}
             for query in variants:
                 try:
@@ -262,6 +265,30 @@ def resolve_upt_coordinates_sync(upt_name: str) -> Optional[Dict[str, Any]]:
                         return result
                 except Exception:
                     continue
+
+            # Strategy 2: GoAPI Places (Indonesia-optimized)
+            if api_key:
+                for query in variants:
+                    try:
+                        params = {"search": query, "api_key": api_key}
+                        response = client.get(
+                            "https://api.goapi.io/places",
+                            params=params,
+                            timeout=10,
+                        )
+                        data = response.json()
+                        if data.get("status") == "success":
+                            results = data.get("data", {}).get("results", [])
+                            if results:
+                                place = results[0]
+                                lat = float(place["lat"])
+                                lng = float(place["lng"])
+                                addr = place.get("displayName", "")
+                                result = _make_result(upt_name, lat, lng, addr)
+                                logger.info(f"Geocoded '{upt_name}' via GoAPI query '{query}' → {result['latitude']}, {result['longitude']}")
+                                return result
+                    except Exception:
+                        continue
 
     except Exception as e:
         logger.error(f"Sync Geocoding Error for {upt_name}: {e}")
