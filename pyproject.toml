@@ -3,8 +3,15 @@ name = "star-asn"
 version = "1.0.0"
 description = "Enterprise-grade Star ASN Attendance Automation"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
+    "structlog",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-instrumentation-httpx",
+    "opentelemetry-instrumentation-asyncpg",
+    "opentelemetry-exporter-otlp",
     "requests",
     "urllib3",
     "beautifulsoup4",
@@ -43,7 +50,7 @@ dev = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py313"
 extend-exclude = ["*_virtual_*"]
 
 [tool.ruff.lint]
@@ -64,7 +71,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 mypy_path = "typings"
 exclude = [
     "\\.venv/",

@@ -340,9 +340,21 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     logger.info("Star ASN Multi-User Bot is listening...")
-    
-    logger.info("Star ASN Multi-User Bot is listening...")
-    app.run_polling()
+
+    # Webhook mode for production, polling for development
+    webhook_url = settings.BOT_WEBHOOK_URL
+    if webhook_url:
+        logger.info(f"Starting in WEBHOOK mode: {webhook_url}")
+        app.run_webhook(
+            listen=settings.BOT_WEBHOOK_LISTEN_HOST,
+            port=settings.BOT_WEBHOOK_LISTEN_PORT,
+            url_path="bot/webhook",
+            webhook_url=f"{webhook_url}/bot/webhook",
+            secret_token=settings.BOT_WEBHOOK_SECRET,
+        )
+    else:
+        logger.info("Starting in POLLING mode (development)")
+        app.run_polling()
 
 
 if __name__ == "__main__":

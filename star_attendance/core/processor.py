@@ -145,7 +145,7 @@ async def process_single_user(
     last_error: str | None = None
     acquired_lock = False
 
-    engine = AttendanceEngine(action=action, nip=nip, status_callback=status_callback)
+    engine = AttendanceEngine(action=action, nip=nip, status_callback=status_callback, proxy=settings.resolved_proxy_url)
     try:
         if store.has_successful_attendance_today(nip, action):
             from star_attendance.core.timeutils import format_precise_time

@@ -1,3 +1,5 @@
+from functools import cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,10 +45,24 @@ class Settings(BaseSettings):
     WAF_BROWSER_HEADLESS: bool = True
     WAF_BROWSER_MAX_CONCURRENCY: int = 1
 
+    # --- PROXY SETTINGS (Bright Data / Custom) ---
+    PROXY_HOST: str | None = None  # e.g. brd.superproxy.io
+    PROXY_PORT: int = 33335
+    PROXY_USERNAME: str | None = None  # e.g. brd-customer-hl_4d392e9b-zone-residential_proxy-country-id
+    PROXY_PASSWORD: str | None = None
+    PROXY_ENABLED: bool = False  # Master switch — set to true to activate proxy
+
     # --- LOGGING ---
     LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "console"  # "console" or "json" for Loki/Grafana
     LOG_BROADCAST_ENABLED: bool = True
     LOG_TELEGRAM_ENABLED: bool = True
+
+    # --- BOT WEBHOOK ---
+    BOT_WEBHOOK_URL: str | None = None  # e.g. https://star-asn.example.com/bot/webhook
+    BOT_WEBHOOK_SECRET: str | None = None  # Optional secret for webhook verification
+    BOT_WEBHOOK_LISTEN_HOST: str = "0.0.0.0"
+    BOT_WEBHOOK_LISTEN_PORT: int = 11801
 
     # --- BOT INTERFACE & BRANDING ---
     BOT_NAME: str = "STAR-ASN"
@@ -64,19 +80,54 @@ class Settings(BaseSettings):
         return self.POSTGRES_URL
 
     @property
+    def resolved_proxy_url(self) -> str | None:
+        """Construct proxy URL from Bright Data or custom proxy settings.
+
+        Returns http://user:pass@host:port format, or None if proxy is disabled.
+        """
+        if not self.PROXY_ENABLED:
+            return None
+        if not self.PROXY_HOST:
+            return None
+        if self.PROXY_USERNAME and self.PROXY_PASSWORD:
+            return f"http://{self.PROXY_USERNAME}:{self.PROXY_PASSWORD}@{self.PROXY_HOST}:{self.PROXY_PORT}"
+        return f"http://{self.PROXY_HOST}:{self.PROXY_PORT}"
+
+    @property
     def resolved_internal_api_token(self) -> str:
         """Fallback to the master key for backward-compatible internal auth."""
         return self.INTERNAL_API_TOKEN or self.MASTER_SECURITY_KEY
 
 
-# Global instance
-settings = Settings()  # type: ignore[call-arg]
+@cache
+def get_settings() -> Settings:
+    """Get cached Settings instance.
+
+    Uses functools.cache to ensure Settings is only instantiated once
+    and reused across the application.
+
+    Returns:
+        Settings instance with values loaded from environment
+    """
+    # Pydantic Settings reads from environment variables
+    return Settings()  # type: ignore[call-arg]
+
+
+# Global instance for backward compatibility
+settings: Settings = get_settings()
 
 # --- SHARED IDENTITY CONSTANTS ---
 # Used for bypassing WAF/SSO detection with consistent browser fingerprinting
-MASTER_IDENTITY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+MASTER_IDENTITY_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
 MASTER_IDENTITY_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8,"
+        "application/signed-exchange;v=b3;q=0.7"
+    ),
     "Accept-Language": "en-US,en;q=0.9",
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",

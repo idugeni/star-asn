@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '@/lib/supabase';
@@ -33,6 +33,7 @@ export default function App() {
     });
     const [allUsers, setAllUsers] = useState<User[]>([]);
     const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
+    const channelRef = useRef<any>(null);
 
     const changeTab = (tab: string) => {
         if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
@@ -152,11 +153,13 @@ export default function App() {
             }));
 
             // --- REALTIME SUBSCRIPTION (Isolated & Hardened) ---
-            let channel: any;
+            // Use useRef-stored channel to prevent leaks on re-renders
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+            }
             try {
-                // Use unique channel name to avoid clashing on re-renders
-                channel = supabase
-                    .channel(`rt_audit_${Date.now()}`)
+                const rtChannel = supabase
+                    .channel('rt_audit_live')
                     .on('postgres_changes', { 
                         event: 'INSERT', 
                         schema: 'public', 
@@ -166,7 +169,7 @@ export default function App() {
                         if (data.role === 'admin' || newLog.nip === data.nip) {
                             setAttendanceLog(prev => [newLog, ...prev].slice(0, 100));
                             setStats(s => {
-                                const newActivity = [...s.activity];
+                                const newActivity = [...(s.activity ?? [])];
                                 if (newActivity.length > 0) {
                                     newActivity[newActivity.length - 1] += 1;
                                 }
@@ -177,6 +180,7 @@ export default function App() {
                         }
                     })
                     .subscribe();
+                channelRef.current = rtChannel;
             } catch (rtErr) {
                 console.error('Realtime Sync Error:', rtErr);
                 // Don't crash the whole app if realtime fails
@@ -222,7 +226,10 @@ export default function App() {
             }
 
             return () => {
-                supabase.removeChannel(channel);
+                if (channelRef.current) {
+                    supabase.removeChannel(channelRef.current);
+                    channelRef.current = null;
+                }
                 clearInterval(interval);
             };
         } catch (err) {

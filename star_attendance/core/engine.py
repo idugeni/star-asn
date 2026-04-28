@@ -68,7 +68,7 @@ class AttendanceEngine:
         self.timezone = str(runtime_settings.get("timezone", "Asia/Jakarta"))
 
         self.client: Any = AsyncSession(
-            impersonate="chrome120",
+            impersonate="chrome131",
             verify=False,
             timeout=20,
             proxies={"http": self.proxy, "https": self.proxy} if self.proxy else None,

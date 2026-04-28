@@ -84,3 +84,23 @@ docker-compose*.yml
 .github/
 .gitlab-ci.yml
 .travis.yml
+
+# Playwright
+.playwright-cli/
+.ms-playwright/
+
+# Development/Local
+*.ps1
+*.md
+!.dockerignore
+!README.md
+local/
+temp/
+tmp/
+
+# Cache directories
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.pdm-python
+.pdm.toml

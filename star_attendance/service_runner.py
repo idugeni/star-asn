@@ -6,9 +6,15 @@ import logging
 import os
 import sys
 import time
-import urllib.error
-import urllib.request
+import asyncio
+import httpx
 from collections.abc import Callable
+from typing import TypeVar
+
+from star_attendance.core.exceptions import ConfigurationError, MissingEnvironmentVariableError
+from star_attendance.core.logging_config import configure_structlog, get_logger
+
+T = TypeVar("T")
 
 SERVICE_TARGETS: dict[str, str] = {
     "bootstrap": "star_attendance.bootstrap_db:main",
@@ -29,17 +35,15 @@ REQUIRED_ENV: dict[str, tuple[str, ...]] = {
 EXIT_PRECONDITION_FAILED = 78
 
 
-class PreflightError(RuntimeError):
+class PreflightError(ConfigurationError):
+    """Legacy compatibility - maps to ConfigurationError."""
+
     pass
 
 
 def configure_logging() -> logging.Logger:
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    configure_structlog(level_name)
     return logging.getLogger("service_runner")
 
 
@@ -57,18 +61,46 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def load_callable(import_path: str) -> Callable[[], int | None]:
-    module_name, callable_name = import_path.split(":", maxsplit=1)
-    module = importlib.import_module(module_name)
-    target = getattr(module, callable_name, None)
-    if target is None or not callable(target):
-        raise PreflightError(f"Entrypoint '{import_path}' is not callable.")
-    return target
+    """Load a callable from a module path string.
+
+    Args:
+        import_path: String in format 'module.submodule:function_name'
+
+    Returns:
+        Callable that returns int or None
+
+    Raises:
+        PreflightError: If the import fails or target is not callable
+    """
+    try:
+        module_name, callable_name = import_path.split(":", maxsplit=1)
+        module = importlib.import_module(module_name)
+        target = getattr(module, callable_name, None)
+        if target is None:
+            raise PreflightError(f"Entrypoint '{import_path}' not found in module.")
+        if not callable(target):
+            raise PreflightError(f"Entrypoint '{import_path}' is not callable (type: {type(target).__name__}).")
+        return target  # type: ignore[return-value]
+    except ImportError as exc:
+        raise PreflightError(f"Failed to import module for '{import_path}': {exc}") from exc
+    except ValueError as exc:
+        raise PreflightError(f"Invalid import path format '{import_path}'. Expected 'module:function'.") from exc
 
 
 def require_env(command: str) -> None:
-    missing = [name for name in REQUIRED_ENV.get(command, ()) if not os.getenv(name)]
+    """Verify required environment variables are set for a command.
+
+    Raises:
+        MissingEnvironmentVariableError: If any required variable is missing
+    """
+    required = REQUIRED_ENV.get(command, ())
+    missing = [name for name in required if not os.getenv(name)]
     if missing:
-        raise PreflightError(f"Missing required environment variables for '{command}': {', '.join(missing)}")
+        for var_name in missing:
+            raise MissingEnvironmentVariableError(
+                var_name,
+                details={"command": command, "all_missing": missing}
+            )
 
 
 def resolve_retry_settings() -> tuple[int, float]:
@@ -79,7 +111,7 @@ def resolve_retry_settings() -> tuple[int, float]:
 
 def run_service(command: str) -> int:
     require_env(command)
-    
+
     if command == "api-full":
         logger.info("Service 'api-full' detected. Running database bootstrap first...")
         bootstrap_target = load_callable(SERVICE_TARGETS["bootstrap"])
@@ -106,14 +138,13 @@ def check_api() -> int:
     if not token:
         raise PreflightError("Healthcheck requires INTERNAL_API_TOKEN or MASTER_SECURITY_KEY to be set.")
 
-    request = urllib.request.Request(
-        build_healthcheck_url(),
-        headers={"X-Internal-Token": token},
-    )
-    with urllib.request.urlopen(request, timeout=5) as response:
-        response.read()
-        if response.status >= 400:
-            raise RuntimeError(f"Healthcheck failed with status code {response.status}")
+    with httpx.Client(timeout=5.0) as client:
+        response = client.get(
+            build_healthcheck_url(),
+            headers={"X-Internal-Token": token},
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"Healthcheck failed with status code {response.status_code}")
     return 0
 
 
@@ -122,11 +153,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "check-api":
         try:
             return check_api()
-        except PreflightError as exc:
-            logger.error(str(exc))
+        except MissingEnvironmentVariableError as exc:
+            logger.error("Missing environment variable '%s' for healthcheck: %s", exc.var_name, exc)
             return EXIT_PRECONDITION_FAILED
-        except urllib.error.URLError as exc:
-            logger.error("API healthcheck failed: %s", exc)
+        except PreflightError as exc:
+            logger.error("Preflight check failed for healthcheck: %s", exc)
+            return EXIT_PRECONDITION_FAILED
+        except httpx.ConnectError as exc:
+            logger.error("API healthcheck failed (connection): %s", exc)
+            return 1
+        except httpx.TimeoutException as exc:
+            logger.error("API healthcheck failed (timeout): %s", exc)
             return 1
 
     attempts, delay_seconds = resolve_retry_settings()
@@ -134,8 +171,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             logger.info("Starting service '%s' (attempt %s/%s)", args.command, attempt, attempts)
             return run_service(args.command)
+        except MissingEnvironmentVariableError as exc:
+            logger.error("Missing environment variable '%s' for command '%s': %s", exc.var_name, args.command, exc)
+            return EXIT_PRECONDITION_FAILED
         except PreflightError as exc:
-            logger.error(str(exc))
+            logger.error("Preflight check failed for command '%s': %s", args.command, exc)
             return EXIT_PRECONDITION_FAILED
         except KeyboardInterrupt:
             logger.info("Service '%s' interrupted by operator.", args.command)

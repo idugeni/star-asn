@@ -6,16 +6,40 @@ from pgqueuer import Queries
 
 from star_attendance.core.config import settings
 
+_pool: asyncpg.Pool | None = None
 
+
+async def get_queue_pool() -> asyncpg.Pool:
+    """Get or create the shared asyncpg connection pool for queue operations.
+
+    Reuses a single global pool instead of creating a new one per call,
+    preventing connection leaks and reducing overhead.
+    """
+    global _pool
+    if _pool is None or _pool._closed:
+        _pool = await asyncpg.create_pool(
+            dsn=settings.POSTGRES_URL,
+            min_size=5,
+            max_size=20,
+            max_inactive_connection_lifetime=60,
+            command_timeout=15,
+            statement_cache_size=0,
+        )
+    return _pool
+
+
+async def close_queue_pool() -> None:
+    """Gracefully close the shared queue pool (for shutdown)."""
+    global _pool
+    if _pool is not None and not _pool._closed:
+        await _pool.close()
+        _pool = None
+
+
+# Backward-compatible alias
 async def create_queue_pool() -> asyncpg.Pool:
-    return await asyncpg.create_pool(
-        dsn=settings.POSTGRES_URL,
-        min_size=5,
-        max_size=20,
-        max_inactive_connection_lifetime=60,
-        command_timeout=15,
-        statement_cache_size=0,
-    )
+    """Deprecated: Use get_queue_pool() instead. Kept for backward compatibility."""
+    return await get_queue_pool()
 
 
 async def install_queue_schema(pool: asyncpg.Pool) -> bool:
@@ -53,21 +77,17 @@ def decode_queue_payload(raw_payload: Any) -> dict[str, Any]:
 
 async def enqueue_presence_task(nip: str, is_manual: bool = False, action: str = "in") -> None:
     """
-    Enqueues an attendance task to pgqueuer.
+    Enqueues an attendance task to pgqueuer using the shared connection pool.
     """
-    from pgqueuer import Queries  # type: ignore
-    pool = await create_queue_pool()
-    try:
-        queries = Queries.from_asyncpg_pool(pool)
-        payload = {
-            "nip": nip,
-            "action": action,
-            "source": "manual_api" if is_manual else "scheduler_auto"
-        }
-        await queries.enqueue(
-            ["attendance.process"], 
-            [encode_queue_payload(payload)], 
-            [0]
-        )
-    finally:
-        await pool.close()
+    pool = await get_queue_pool()
+    queries = Queries.from_asyncpg_pool(pool)
+    payload = {
+        "nip": nip,
+        "action": action,
+        "source": "manual_api" if is_manual else "scheduler_auto"
+    }
+    await queries.enqueue(
+        ["attendance.process"],
+        [encode_queue_payload(payload)],
+        [0]
+    )

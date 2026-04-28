@@ -22,6 +22,12 @@ from star_attendance.core.timeutils import (
 from star_attendance.db.enums import AuditAction, AuditStatus
 from star_attendance.db.manager import db_manager
 from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserPerformanceAllowance, UserSession, PersonalAllowance, BotMessage
+from star_attendance.db.repositories.allowance_repo import AllowanceRepository
+from star_attendance.db.repositories.audit_repo import AuditRepository
+from star_attendance.db.repositories.bot_message_repo import BotMessageRepository
+from star_attendance.db.repositories.session_repo import SessionRepository
+from star_attendance.db.repositories.settings_repo import SettingsRepository
+from star_attendance.db.repositories.user_repo import UserRepository
 from star_attendance.db.types import AuditLogData, UserData
 
 DEFAULT_LOCATION_LATITUDE = -6.2210973
@@ -257,7 +263,12 @@ class SupabaseManager:
     user_summaries_cache: tuple[float, list[UserData]] | None = None
 
     def __init__(self) -> None:
-        pass
+        self._users = UserRepository()
+        self._audit = AuditRepository()
+        self._settings = SettingsRepository()
+        self._sessions = SessionRepository()
+        self._allowances = AllowanceRepository()
+        self._bot_messages = BotMessageRepository()
 
     @staticmethod
     def now_monotonic() -> float:
@@ -267,11 +278,14 @@ class SupabaseManager:
         return (self.now_monotonic() - timestamp) < ttl_seconds
 
     def invalidate_settings_cache(self) -> None:
+        self._settings.invalidate_settings_cache()
         with self.cache_lock:
             self.__class__.settings_cache = None
 
     def invalidate_all_caches(self) -> None:
         """Forcibly clear all internal caches for real-time synchronization."""
+        self._settings.invalidate_all_caches()
+        self._users.invalidate_all_caches()
         with self.cache_lock:
             self.__class__.settings_cache = None
             self.__class__.user_cache.clear()
@@ -279,6 +293,7 @@ class SupabaseManager:
             self.__class__.user_summaries_cache = None
 
     def invalidate_user_cache(self, nip: str | None = None) -> None:
+        self._users.invalidate_user_cache(nip)
         with self.cache_lock:
             if nip:
                 self.__class__.user_cache.pop(nip, None)
@@ -1595,3 +1610,29 @@ class SupabaseManager:
         with db_manager.get_session() as session:
             users = session.query(User).filter(User.telegram_id != None).all()  # noqa: E711
             return sorted({int(user.telegram_id) for user in users if user.telegram_id is not None})
+
+    # --- REPOSITORY ACCESSORS (for direct, fine-grained access) ---
+
+    @property
+    def users(self) -> UserRepository:
+        return self._users
+
+    @property
+    def audit(self) -> AuditRepository:
+        return self._audit
+
+    @property
+    def settings_repo(self) -> SettingsRepository:
+        return self._settings
+
+    @property
+    def sessions(self) -> SessionRepository:
+        return self._sessions
+
+    @property
+    def allowances(self) -> AllowanceRepository:
+        return self._allowances
+
+    @property
+    def bot_messages(self) -> BotMessageRepository:
+        return self._bot_messages

@@ -839,17 +839,22 @@ class LoginHandler:
 
         async with browser_bridge_semaphore:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=settings.WAF_BROWSER_HEADLESS, 
-                    args=[
-                        "--no-sandbox", 
-                        "--disable-setuid-sandbox", 
+                launch_opts: dict = {
+                    "headless": settings.WAF_BROWSER_HEADLESS,
+                    "args": [
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
                         "--disable-dev-shm-usage",
                         "--disable-blink-features=AutomationControlled",
-                    ]
-                )
+                    ],
+                }
+                # Pass proxy to Chromium if configured (Bright Data / custom)
+                if self.proxy:
+                    launch_opts["proxy"] = {"server": self.proxy}
+
+                browser = await p.chromium.launch(**launch_opts)
                 context = await browser.new_context(
-                    user_agent=self.user_agent, 
+                    user_agent=self.user_agent,
                     viewport={"width": 1280, "height": 720},
                     ignore_https_errors=True
                 )
