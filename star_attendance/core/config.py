@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     PROXY_PASSWORD: str | None = None
     PROXY_ENABLED: bool = False  # Master switch — set to true to activate proxy
 
+    # --- GEOCODING ---
+    GOOGLE_MAPS_API_KEY: str | None = None  # Optional: Google Maps Geocoding API key for better UPT coordinate resolution
+
     # --- LOGGING ---
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "console"  # "console" or "json" for Loki/Grafana
