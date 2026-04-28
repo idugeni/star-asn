@@ -597,16 +597,23 @@ class LoginHandler:
             try:
                 if LoginHandler.cached_public_ip == "N/A":
                     try:
-                        # Try ipify first
-                        ip_resp = await self.client.get("https://api.ipify.org", timeout=5)
+                        # Try ipify first (through proxy if configured)
+                        ip_resp = await self.client.get("https://api.ipify.org", timeout=10)
                         LoginHandler.cached_public_ip = ip_resp.text.strip()
                     except Exception:
                         try:
-                            # Fallback if ipify is blocked or down
-                            ip_resp = await self.client.get("https://ifconfig.me", timeout=5)
-                            LoginHandler.cached_public_ip = ip_resp.text.strip()
+                            # Fallback: httpx without proxy (shows real server IP)
+                            import httpx as _httpx
+                            async with _httpx.AsyncClient(timeout=10) as hc:
+                                ip_resp = await hc.get("https://api.ipify.org")
+                                LoginHandler.cached_public_ip = ip_resp.text.strip()
                         except Exception:
-                            pass
+                            try:
+                                # Last fallback: ifconfig.me
+                                ip_resp = await self.client.get("https://ifconfig.me", timeout=10)
+                                LoginHandler.cached_public_ip = ip_resp.text.strip()
+                            except Exception:
+                                pass
 
                 perf_start = time.perf_counter()
                 r_init = await self.client.get(login_url)

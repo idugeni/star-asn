@@ -89,8 +89,8 @@ def build_startup_dashboard(metrics: dict[str, Any]) -> str:
     # Safe IP Fetch
     public_ip = "UNKNOWN"
     try:
-        import requests
-        public_ip = requests.get("https://api.ipify.org", timeout=5).text.strip()
+        import httpx
+        public_ip = httpx.get("https://api.ipify.org", timeout=10).text.strip()
     except Exception:
         pass
 
