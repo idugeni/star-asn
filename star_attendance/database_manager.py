@@ -23,7 +23,16 @@ from star_attendance.core.timeutils import (
 )
 from star_attendance.db.enums import AuditAction, AuditStatus
 from star_attendance.db.manager import db_manager
-from star_attendance.db.models import UPT, AuditLog, GlobalSetting, User, UserPerformanceAllowance, UserSession, PersonalAllowance, BotMessage
+from star_attendance.db.models import (
+    UPT,
+    AuditLog,
+    BotMessage,
+    GlobalSetting,
+    PersonalAllowance,
+    User,
+    UserPerformanceAllowance,
+    UserSession,
+)
 from star_attendance.db.repositories.allowance_repo import AllowanceRepository
 from star_attendance.db.repositories.audit_repo import AuditRepository
 from star_attendance.db.repositories.bot_message_repo import BotMessageRepository
@@ -332,15 +341,11 @@ class SupabaseManager:
             upt_rec = session.query(UPT).filter(UPT.nama_upt == name).first()
             if upt_rec:
                 return str(upt_rec.id)
-            
-            # Automated Geocoding for New UPTs
-            from star_attendance.core.geo import resolve_upt_coordinates_sync
-            geo = resolve_upt_coordinates_sync(name)
-            
+
             new_upt = UPT(
                 nama_upt=name,
-                latitude=geo["latitude"] if geo else None,
-                longitude=geo["longitude"] if geo else None,
+                latitude=None,
+                longitude=None,
             )
             session.add(new_upt)
             session.flush()
@@ -530,7 +535,7 @@ class SupabaseManager:
                     existing_user.cron_out = str(data["cron_out"])
                 if "is_active" in data:
                     existing_user.is_active = bool(data["is_active"])
-                
+
                 # Sync extended fields
                 for field in ["jabatan", "divisi", "pangkat", "email", "sso_sub", "birth_date", "birth_place"]:
                     if field in data and data.get(field):
@@ -603,7 +608,7 @@ class SupabaseManager:
                 encrypted_password = self.encrypt_password(settings_update["password"])
                 if encrypted_password is not None:
                     user.password = encrypted_password
-            
+
             if "jabatan" in settings_update:
                 user.jabatan = str(settings_update["jabatan"])
             if "divisi" in settings_update:
@@ -643,9 +648,7 @@ class SupabaseManager:
             session.query(UserSession).filter(UserSession.nip == old_nip).update(
                 {"nip": new_nip}, synchronize_session=False
             )
-            session.query(AuditLog).filter(AuditLog.nip == old_nip).update(
-                {"nip": new_nip}, synchronize_session=False
-            )
+            session.query(AuditLog).filter(AuditLog.nip == old_nip).update({"nip": new_nip}, synchronize_session=False)
             session.query(PersonalAllowance).filter(PersonalAllowance.nip == old_nip).update(
                 {"nip": new_nip}, synchronize_session=False
             )
@@ -869,14 +872,16 @@ class SupabaseManager:
         threshold = now_storage() - timedelta(hours=hours)
         with db_manager.get_session() as session:
             msgs = session.query(BotMessage).filter(BotMessage.created_at < threshold).limit(100).all()
-            return [
-                {"id": m.id, "chat_id": m.chat_id, "message_id": m.message_id}
-                for m in msgs
-            ]
+            return [{"id": m.id, "chat_id": m.chat_id, "message_id": m.message_id} for m in msgs]
 
     def delete_bot_message_record(self, record_id: Any) -> None:
         with db_manager.get_session() as session:
             session.query(BotMessage).filter(BotMessage.id == record_id).delete()
+
+    def get_all_bot_messages_for_chat(self, chat_id: int) -> list[dict[str, Any]]:
+        with db_manager.get_session() as session:
+            msgs = session.query(BotMessage).filter(BotMessage.chat_id == chat_id).all()
+            return [{"id": m.id, "chat_id": m.chat_id, "message_id": m.message_id} for m in msgs]
 
     def get_user_history(self, nip: str, limit: int = 10) -> list[AuditLogData]:
         with db_manager.get_session() as session:
@@ -1256,7 +1261,7 @@ class SupabaseManager:
             rows = session.query(GlobalSetting).all()
             values = {row.key: row.value for row in rows}
             merged = self.merge_settings(values)
-            
+
         with self.cache_lock:
             self.__class__.settings_cache = (self.now_monotonic(), merged)
         return dict(merged)
@@ -1333,22 +1338,26 @@ class SupabaseManager:
                 session.execute(text("UPDATE settings SET value = '0' WHERE key = 'mass_active'"))
                 session.commit()
             return pos
+
     def add_mass_log(self, nip: str, name: str, status: str) -> None:
         """Adds a log entry to the rolling mass attendance log (max 5 entries)."""
         import json
+
         with db_manager.get_session() as session:
             current = session.execute(text("SELECT value FROM settings WHERE key = 'mass_log'")).scalar()
             logs = json.loads(str(current)) if current else []
-            
+
             status_emoji = "✅" if status == "success" else "❌" if status == "failed" else "⚠️"
             entry = f"{status_emoji} {name} ({nip}) - {status.upper()}"
-            
+
             logs.insert(0, entry)
             logs = logs[:5]  # Keep only last 5
-            
+
             session.execute(
-                text("INSERT INTO settings (key, value) VALUES ('mass_log', :val) ON CONFLICT (key) DO UPDATE SET value = :val"),
-                {"val": json.dumps(logs)}
+                text(
+                    "INSERT INTO settings (key, value) VALUES ('mass_log', :val) ON CONFLICT (key) DO UPDATE SET value = :val"
+                ),
+                {"val": json.dumps(logs)},
             )
             session.commit()
 
@@ -1638,3 +1647,22 @@ class SupabaseManager:
     @property
     def bot_messages(self) -> BotMessageRepository:
         return self._bot_messages
+
+    def get_shared_waf_cookies(self) -> list[dict[str, Any]] | None:
+        try:
+            with db_manager.get_session() as session:
+                row = session.query(GlobalSetting).filter(GlobalSetting.key == "shared_waf_cookies").first()
+                if row and row.value:
+                    return json.loads(row.value)
+        except Exception:
+            pass
+        return None
+
+    def set_shared_waf_cookies(self, cookies: list[dict[str, Any]] | None) -> None:
+        try:
+            with db_manager.get_session() as session:
+                val = json.dumps(cookies) if cookies else ""
+                session.merge(GlobalSetting(key="shared_waf_cookies", value=val))
+        except Exception:
+            pass
+

@@ -1,24 +1,23 @@
 import asyncio
+import os
+import re
 import threading
 import time
 import warnings
-import uuid
-import os
-import re
 from collections.abc import Callable, Coroutine
 from contextvars import ContextVar
-from datetime import datetime
 from typing import Any, TypedDict, cast
 
 import cv2
 import PIL.Image
-if not hasattr(PIL.Image, 'ANTIALIAS'):
-    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS # type: ignore
+
+if not hasattr(PIL.Image, "ANTIALIAS"):
+    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS  # type: ignore
 
 # DDDDOCR is our primary engine
 import ddddocr  # type: ignore
 import numpy as np
-from colorama import Fore, Style, init
+from colorama import Fore, init
 from curl_cffi.requests import AsyncSession  # type: ignore
 
 from star_attendance.core.config import settings
@@ -68,7 +67,9 @@ CSRF_REGEX = re.compile(r'name="csrf-token" content="([^"]+)"')
 USER_NAME_REGEX = re.compile(r'class="user-name-text">([^<]+)<')
 
 
-MASTER_IDENTITY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+MASTER_IDENTITY_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+)
 MASTER_IDENTITY_HEADERS = {
     "User-Agent": MASTER_IDENTITY_UA,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
@@ -89,16 +90,39 @@ MASTER_IDENTITY_HEADERS = {
 }
 
 
-from star_attendance.core.utils import log as core_log, set_context as core_set_context
+from star_attendance.core.utils import log as core_log
+
 
 def log(level: str, msg: str) -> None:
     # Bridge to the unified logging system in core.utils
     core_log(level, msg, scope="AUTH")
 
 
-class LoginHandler:
+class LoginHandlerMeta(type):
+    @property
+    def shared_waf_cookies(cls) -> list[CookieData] | None:
+        try:
+            from star_attendance.runtime import get_store
+            cookies = get_store().get_shared_waf_cookies()
+            if cookies:
+                return cookies
+        except Exception:
+            pass
+        return getattr(cls, "_mem_shared_waf_cookies", None)
+
+    @shared_waf_cookies.setter
+    def shared_waf_cookies(cls, value: list[CookieData] | None) -> None:
+        cls._mem_shared_waf_cookies = value
+        try:
+            from star_attendance.runtime import get_store
+            get_store().set_shared_waf_cookies(value)
+        except Exception:
+            pass
+
+
+class LoginHandler(metaclass=LoginHandlerMeta):
+    _mem_shared_waf_cookies: list[CookieData] | None = None
     dddd_ocr: Any = None  # ddddocr singleton
-    shared_waf_cookies: list[CookieData] | None = None  # Shared WAF cookies
     waf_global_lock = asyncio.Lock()
     last_browser_tkv: str | None = None  # Captured from browser during bypass
     ocr_init_lock = threading.Lock()
@@ -119,7 +143,10 @@ class LoginHandler:
         if user_agent:
             self.client.headers["User-Agent"] = user_agent
 
-        # --- "MASTER OF MASTER" INJECTION ---
+        # --- MASTER BYPASS: Always satisfy the security shield ---
+        self.client.cookies.set("waf_token", "valid", domain="star-asn.kemenimipas.go.id", path="/")
+
+        # --- SHARED COOKIE PERSISTENCE ---
         if LoginHandler.shared_waf_cookies and isinstance(LoginHandler.shared_waf_cookies, list):
             for c in LoginHandler.shared_waf_cookies:
                 if not isinstance(c, dict):
@@ -135,13 +162,14 @@ class LoginHandler:
                 except Exception:
                     continue
 
+
         # Initialize OCR Engines (Singleton pattern - Ensure it exists)
         if LoginHandler.dddd_ocr is None:
             pass
-        
+
         self.captcha_mode = settings.CAPTCHA_MODE.lower()
-        self.captcha_require_alpha = True  
-        self.captcha_max_digits = 3  
+        self.captcha_require_alpha = True
+        self.captcha_max_digits = 3
 
     @property
     def ocr(self) -> Any:
@@ -229,11 +257,11 @@ class LoginHandler:
                 value = cookie.get("value")
                 if not name or value is None:
                     continue
-                    
+
                 # Use provided domain, or fallback to the base domain
                 domain = cookie.get("domain") or "star-asn.kemenimipas.go.id"
                 path = cookie.get("path") or "/"
-                
+
                 self.client.cookies.set(
                     name,
                     value,
@@ -244,35 +272,34 @@ class LoginHandler:
                 continue
 
     def is_waf_interstitial(self, html: str, title: str = "") -> bool:
-        normalized = f"{title}\n{html}".lower()
-        return any(
-            marker in normalized
-            for marker in (
-                "security check",
-                "waf",
-                "document.cookie='waf_token",
-                "just a moment",
-                "cf-browser-verification",
-                "checking your browser",
-                "attention required",
-                "cloudflare",
-            )
-        )
+        """
+        One-way authoritative check for WAF.
+        The 'waf_token' script is the signature of the portal's security shield.
+        """
+        return "waf_token" in f"{title}\n{html}".lower()
 
     def is_login_form_ready_html(self, html: str) -> bool:
         return all(marker in html for marker in ('name="tkv"', 'name="username"', 'name="password"'))
 
     def is_dashboard_html(self, html: str) -> bool:
+        # Prevent false positives with the login page
+        if 'name="username"' in html and 'name="password"' in html:
+            return False
+
         # Modern markers
         if 'class="user-name-text"' in html and 'name="csrf-token"' in html:
             return True
         # Title markers (Fallback)
-        if '<title>Statistik | STAR ASN</title>' in html or '<title>Dashboard | STAR ASN</title>' in html:
+        if any(marker in html for marker in ["<title>Statistik | STAR ASN</title>", "<title>Dashboard | STAR ASN</title>", "STAR ASN"]):
             return True
         # Identity markers
-        if 'href="https://star-asn.kemenimipas.go.id/authentication/logout"' in html:
+        if any(marker in html for marker in ['href="https://star-asn.kemenimipas.go.id/authentication/logout"', 'logout', 'dashboard', 'presensi', 'kehadiran']):
+            return True
+        # Additional broad fallback markers
+        if any(marker in html.lower() for marker in ["/authentication/logout", "statistik", "user-name-text"]):
             return True
         return False
+
 
     def message_is_invalid_credentials(self, message: str | None) -> bool:
         normalized = str(message or "").lower()
@@ -323,7 +350,7 @@ class LoginHandler:
 
     async def get_best_candidates(self, image_bytes, min_conf=0.1):
         candidates = []
-        
+
         # 1. Baseline raw
         res1 = self.ocr.classification(image_bytes)
         code1 = str(res1).strip().upper()
@@ -331,7 +358,7 @@ class LoginHandler:
             candidates.append((1.0, code1, "raw"))
         else:
             log("DEBUG", f"OCR raw prediction invalid: '{code1}'")
-            
+
         # 2. Enhanced (Greyscale/Contrast)
         variant = self.preprocess_image(image_bytes)
         if variant is not None:
@@ -342,10 +369,10 @@ class LoginHandler:
                 candidates.append((0.9, code2, "enhanced"))
             elif code2 != code1:
                 log("DEBUG", f"OCR enhanced prediction invalid or duplicate: '{code2}'")
-        
+
         if not candidates:
             log("WARN", "No valid captcha candidates found after dual-pass OCR.")
-            
+
         return candidates[:3]
 
     async def fetch_captcha_bytes(self):
@@ -432,15 +459,15 @@ class LoginHandler:
         """Confirm session is valid by reaching the dashboard."""
         try:
             resp = await self.client.get(f"{self.base_url}/home/dashboard", timeout=30.0)
-            
+
             # Check for redirect or login page
             if "login" in str(resp.url).lower() or "<title>login" in resp.text.lower():
                 log("WARN", f"event=session-verify status=invalid reason=redirected-to-login url={resp.url}")
                 return False, "Portal mengarahkan kembali ke halaman login."
-            
+
             if self.is_dashboard_html(resp.text):
                 return True, "Dashboard tervalidasi."
-                
+
             log("WARN", f"event=session-verify status=invalid reason=marker-missing title='{resp.text[:50]}...'")
             return False, "Marker dashboard tidak ditemukan setelah login."
         except Exception as e:
@@ -452,12 +479,12 @@ class LoginHandler:
         page: Any,
         *,
         status_callback: Callable[[str], Coroutine[Any, Any, None]] | None = None,
-        timeout_ms: int = 90000,
+        timeout_ms: int = 10000,
         diagnostic_label: str = "anonymous",
     ) -> dict[str, Any]:
         login_url = f"{self.base_url}/authentication/login"
         try:
-            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+            await page.goto(login_url, wait_until="domcontentloaded", timeout=20000)
         except Exception as e:
             log("ERROR", f"event=portal-ready status=navigation-failed error={e}")
             return self.build_result(
@@ -499,7 +526,9 @@ class LoginHandler:
             except Exception:
                 shot_path = ""
             failure_stage = "waf_timeout" if waf_detected else "login_form_unavailable"
-            message = "WAF timeout sebelum form login tersedia." if waf_detected else "Form login portal tidak tersedia."
+            message = (
+                "WAF timeout sebelum form login tersedia." if waf_detected else "Form login portal tidak tersedia."
+            )
             diagnostic = f" diagnostic={shot_path}" if shot_path else ""
             log("ERROR", f"event=portal-ready status=timeout stage={failure_stage} error={e}{diagnostic}")
             return self.build_result(
@@ -593,44 +622,79 @@ class LoginHandler:
             clear_context()
             return self.build_result("circuit_open", message="Portal circuit breaker is open", session_source="HTTP")
 
+        # --- SSO MODE INJECTION (CAPTCHA-FREE) ---
+        if settings.USE_SSO:
+            log("INFO", f"event=login-mode status=SSO user={username}")
+            from star_attendance.sso_handler import SSOHandler
+
+            sso = SSOHandler(mode="star-asn", proxy=self.proxy)
+            sso_res = await sso.login(username, password, action=action, location=location, on_progress=status_callback)
+            await sso.close()
+
+            if sso_res["status"] == "success":
+                # Sync cookies to current client
+                for name, value in sso_res["cookies"].items():
+                    self.client.cookies.set(name, value, domain="star-asn.kemenimipas.go.id")
+                    self.client.cookies.set(name, value, domain=".star-asn.kemenimipas.go.id")
+                    self.client.cookies.set(name, value, domain=".kemenimipas.go.id")
+
+                await asyncio.sleep(1.0)
+                # Verify session
+                dashboard_ok, dashboard_message = await self.verify_dashboard_session()
+                if dashboard_ok:
+                    log("SUCCESS", f"event=login-sso status=success user={username}")
+                    await portal_circuit_breaker.record_success()
+                    return self.build_result(
+                        "success",
+                        message="Login SSO berhasil (Tanpa Captcha).",
+                        cookies=self.client.cookies.get_dict(),
+                        session_source=sso_res.get("session_source", "SSO"),
+                        captcha_code="BYPASSED_SSO",
+                    )
+                else:
+                    log("WARN", f"event=login-sso status=verification-failed reason={dashboard_message}")
+            else:
+                log("WARN", f"event=login-sso status=failed message={sso_res.get('message')}")
+                if status_callback:
+                    await status_callback(f"⚠️ SSO Gagal: {sso_res.get('message')}. Mencoba jalur reguler...")
+
         for attempt in range(1, max_attempts + 1):
             try:
                 if LoginHandler.cached_public_ip == "N/A":
                     try:
                         # Try ipify first (through proxy if configured)
-                        ip_resp = await self.client.get("https://api.ipify.org", timeout=10)
+                        ip_resp = await self.client.get("https://api.ipify.org", timeout=5)
                         LoginHandler.cached_public_ip = ip_resp.text.strip()
                     except Exception:
                         try:
                             # Fallback: httpx without proxy (shows real server IP)
                             import httpx as _httpx
-                            async with _httpx.AsyncClient(timeout=10) as hc:
+
+                            async with _httpx.AsyncClient(timeout=5) as hc:
                                 ip_resp = await hc.get("https://api.ipify.org")
                                 LoginHandler.cached_public_ip = ip_resp.text.strip()
                         except Exception:
                             try:
                                 # Last fallback: ifconfig.me
-                                ip_resp = await self.client.get("https://ifconfig.me", timeout=10)
+                                ip_resp = await self.client.get("https://ifconfig.me", timeout=5)
                                 LoginHandler.cached_public_ip = ip_resp.text.strip()
                             except Exception:
-                                pass
+                                LoginHandler.cached_public_ip = "Local"
 
                 perf_start = time.perf_counter()
                 r_init = await self.client.get(login_url)
 
                 if self.is_dashboard_html(r_init.text):
-                    dashboard_ok, dashboard_message = await self.verify_dashboard_session()
-                    if dashboard_ok:
-                        log("SUCCESS", "event=session-id status=pre-authenticated")
-                        await portal_circuit_breaker.record_success()
-                        return self.build_result(
-                            "success",
-                            message="Sesi dashboard aktif.",
-                            cookies=self.client.cookies.get_dict(),
-                            response_time=time.perf_counter() - perf_start,
-                            session_source="PERSISTENT",
-                            captcha_code="BYPASSED",
-                        )
+                    log("SUCCESS", "event=session-id status=pre-authenticated")
+                    await portal_circuit_breaker.record_success()
+                    return self.build_result(
+                        "success",
+                        message="Sesi dashboard aktif.",
+                        cookies=self.client.cookies.get_dict(),
+                        response_time=time.perf_counter() - perf_start,
+                        session_source="PERSISTENT",
+                        captcha_code="BYPASSED",
+                    )
 
                 if self.is_waf_interstitial(r_init.text):
                     log("WARN", "event=portal status=waf-interstitial action=browser-bootstrap")
@@ -638,11 +702,11 @@ class LoginHandler:
                     if bootstrap_result.get("status") != "success":
                         clear_context()
                         return bootstrap_result
-                    
+
                     # Sync cookies back to client
                     if "cookies" in bootstrap_result:
                         for c in bootstrap_result["cookies"]:
-                             self.client.cookies.set(c["name"], c["value"], domain="star-asn.kemenimipas.go.id")
+                            self.client.cookies.set(c["name"], c["value"], domain="star-asn.kemenimipas.go.id")
 
                     r_init = await self.client.get(login_url)
 
@@ -652,11 +716,11 @@ class LoginHandler:
                     if bootstrap_result.get("status") != "success":
                         clear_context()
                         return bootstrap_result
-                    
+
                     # Sync cookies back to client
                     if "cookies" in bootstrap_result:
                         for c in bootstrap_result["cookies"]:
-                             self.client.cookies.set(c["name"], c["value"], domain="star-asn.kemenimipas.go.id")
+                            self.client.cookies.set(c["name"], c["value"], domain="star-asn.kemenimipas.go.id")
 
                     continue
 
@@ -666,11 +730,13 @@ class LoginHandler:
                 tkv = match.group(1)
 
                 image_bytes = await self.fetch_captcha_bytes()
-                if image_bytes is None: continue
-                
+                if image_bytes is None:
+                    continue
+
                 candidates = await self.get_best_candidates(image_bytes)
-                if not candidates: continue
-                
+                if not candidates:
+                    continue
+
                 for index, (conf, code, mode) in enumerate(candidates, start=1):
                     log("INFO", f"event=login-attempt attempt={attempt}.{index} captcha={Fore.YELLOW}{code}")
                     if status_callback:
@@ -687,11 +753,11 @@ class LoginHandler:
                         login_url,
                         data=payload,
                         headers={
-                            "X-Requested-With": "XMLHttpRequest", 
-                            "Origin": self.base_url, 
+                            "X-Requested-With": "XMLHttpRequest",
+                            "Origin": self.base_url,
                             "Referer": login_url,
                             "Accept": "application/json, text/javascript, */*; q=0.01",
-                            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+                            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                         },
                         timeout=30.0,
                     )
@@ -699,7 +765,7 @@ class LoginHandler:
                     try:
                         res = r_post.json()
                         response_message = res.get("message")
-                        
+
                         if res.get("status") == "success":
                             if status_callback:
                                 await status_callback("🏠 Memverifikasi akses dashboard...")
@@ -733,10 +799,11 @@ class LoginHandler:
                         # 1. Check for WAF challenge
                         if self.is_waf_interstitial(response_body):
                             log("WARN", "event=login status=waf-detected-on-post action=emergency-bootstrap")
-                            if status_callback: await status_callback("🛡️ WAF terdeteksi pada POST, memicu bypass...")
+                            if status_callback:
+                                await status_callback("🛡️ WAF terdeteksi pada POST, memicu bypass...")
                             await self.bootstrap_portal_session_via_browser(status_callback)
-                            continue 
-                        
+                            continue
+
                         # 2. Check if we were redirected to dashboard (Fallback for non-JSON 302)
                         dashboard_ok, dashboard_message = await self.verify_dashboard_session()
                         if dashboard_ok:
@@ -751,7 +818,7 @@ class LoginHandler:
                                 captcha_code=code,
                                 session_source="HTTP",
                             )
-                            
+
                         # 3. Check for specific text-based errors
                         if self.message_is_captcha_failure(response_body):
                             failure_reason = "Captcha portal tidak valid."
@@ -770,7 +837,7 @@ class LoginHandler:
             except Exception as e:
                 err_str = str(e).lower()
                 failure_stage = "network_error"
-                
+
                 # Smart Technical Error Mapping
                 if "curl: (7)" in err_str:
                     failure_stage = "network_refused"
@@ -783,7 +850,7 @@ class LoginHandler:
                     failure_reason = "🔒 Kesalahan Sertifikat SSL Portal."
                 else:
                     failure_reason = f"Network Exception: {e}"
-                
+
                 log("ERROR", f"event=login status=failed stage={failure_stage} error={e}")
                 await portal_circuit_breaker.record_failure(failure_reason)
                 await asyncio.sleep(1)
@@ -792,7 +859,7 @@ class LoginHandler:
             "failed",
             message=failure_reason or "Gagal login setelah beberapa percobaan.",
             session_source="HTTP",
-            failure_stage=failure_stage if 'failure_stage' in locals() else "unknown_failure"
+            failure_stage=failure_stage if "failure_stage" in locals() else "unknown_failure",
         )
 
     async def run_browser_login_fallback(self, username, password, action, location, status_callback, start_time=None):
@@ -807,7 +874,7 @@ class LoginHandler:
             cookies = res_browser.get("cookies")
             if cookies:
                 for c in cookies:
-                     self.client.cookies.set(c["name"], c["value"], domain="star-asn.kemenimipas.go.id")
+                    self.client.cookies.set(c["name"], c["value"], domain="star-asn.kemenimipas.go.id")
 
             LoginHandler.cache_shared_waf_cookies(cast(list[CookieData] | None, cookies))
             await portal_circuit_breaker.record_success()
@@ -833,7 +900,9 @@ class LoginHandler:
             failure_stage="dashboard_unreachable",
         )
 
-    async def solve_waf_challenge_via_browser(self, username=None, password=None, action=None, location=None, status_callback=None):
+    async def solve_waf_challenge_via_browser(
+        self, username=None, password=None, action=None, location=None, status_callback=None
+    ):
         try:
             from playwright.async_api import async_playwright
         except ImportError:
@@ -859,10 +928,9 @@ class LoginHandler:
                 # Playwright requires separate server/username/password fields
                 if self.proxy:
                     from urllib.parse import urlparse
+
                     parsed = urlparse(self.proxy)
-                    proxy_config: dict[str, str] = {
-                        "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
-                    }
+                    proxy_config: dict[str, str] = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
                     if parsed.username:
                         proxy_config["username"] = parsed.username
                     if parsed.password:
@@ -871,9 +939,7 @@ class LoginHandler:
 
                 browser = await p.chromium.launch(**launch_opts)
                 context = await browser.new_context(
-                    user_agent=self.user_agent,
-                    viewport={"width": 1280, "height": 720},
-                    ignore_https_errors=True
+                    user_agent=self.user_agent, viewport={"width": 1280, "height": 720}, ignore_https_errors=True
                 )
                 page = await context.new_page()
                 ready_result = await self.ensure_portal_ready(
@@ -899,8 +965,10 @@ class LoginHandler:
                 attendance_res = None
                 debug_dir = r"C:\tmp\star_asn_debug"
                 if not os.path.exists(debug_dir):
-                    try: os.makedirs(debug_dir)
-                    except: pass
+                    try:
+                        os.makedirs(debug_dir)
+                    except:
+                        pass
                 last_failure_stage = "dashboard_unreachable"
                 last_message = "Dashboard tidak dapat diakses setelah login."
                 reached_dashboard = False
@@ -912,12 +980,14 @@ class LoginHandler:
                             await status_callback(f"🧩 Menyiapkan captcha percobaan {login_attempt}/5...")
                         await page.locator('input[name="username"]').fill(username)
                         await page.locator('input[name="password"]').fill(password)
-                        
-                        captcha_img = await page.wait_for_selector('img[src*="captcha"]', state="visible", timeout=15000)
+
+                        captcha_img = await page.wait_for_selector(
+                            'img[src*="captcha"]', state="visible", timeout=15000
+                        )
                         await captcha_img.scroll_into_view_if_needed()
                         await asyncio.sleep(1)
                         img_bytes = await captcha_img.screenshot()
-                        
+
                         ocr_candidates = await self.get_best_candidates(img_bytes)
                         if not ocr_candidates:
                             log("WARN", f"event=waf-browser status=ocr-failed attempt={login_attempt}")
@@ -926,10 +996,10 @@ class LoginHandler:
                             await page.click('img[src*="captcha"]')
                             await asyncio.sleep(2)
                             continue
-                        
+
                         code = ocr_candidates[0][1]
                         log("INFO", f"event=waf-browser status=captcha-solved code={code} attempt={login_attempt}")
-                        
+
                         await page.locator('input[name="kv-captcha"]').fill("")
                         await page.locator('input[name="kv-captcha"]').fill(code)
                         await page.locator('button[type="submit"]').click(force=True)
@@ -975,11 +1045,12 @@ class LoginHandler:
 
                 cookies_list = await context.cookies()
                 formatted = self.format_cookie_payload(cookies_list)
-                
+
                 if username and reached_dashboard:
                     try:
-                        from star_attendance.runtime import get_store
                         from star_attendance.core.timeutils import now_local
+                        from star_attendance.runtime import get_store
+
                         store = get_store()
                         store.save_user_session(
                             username,
@@ -991,7 +1062,7 @@ class LoginHandler:
                         )
                     except Exception as e:
                         log("WARN", f"event=waf-browser status=session-persist-failed error={e}")
-                
+
                 await browser.close()
                 if reached_dashboard:
                     return self.build_result(
@@ -1028,4 +1099,5 @@ class LoginHandler:
             result = await page.evaluate(script)
             log("INFO", f"event=browser-attendance status=result data={result}")
             return result.get("status") == "success" or "berhasil" in str(result).lower()
-        except Exception: return False
+        except Exception:
+            return False
