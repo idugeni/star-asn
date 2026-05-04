@@ -1,65 +1,69 @@
 version: '3.8'
 
-x-service-defaults: &star-asn-service
-  build:
-    context: .
-    dockerfile: Dockerfile
-  image: star-asn:latest
-  env_file:
-    - .env
-  init: true
-  stop_grace_period: 30s
-  logging:
-    driver: json-file
-    options:
-      max-size: "10m"
-      max-file: "3"
-  networks:
-    - star-asn-network
-  deploy:
-    restart_policy:
-      condition: on-failure
-      delay: 5s
-      max_attempts: 3
-
 services:
-  bootstrap:
-    <<: *star-asn-service
-    command: bootstrap
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=officialelsa21@gmail.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "18080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - star-asn-network
     deploy:
-      replicas: 1
-      restart_policy:
-        condition: none
       placement:
-        constraints: [node.role == manager]
+        constraints: [ node.role == manager ]
+      restart_policy:
+        condition: on-failure
 
   api:
-    <<: *star-asn-service
+    image: star-asn:latest
     command: api
-    ports:
-      - "11800:11800"
-    healthcheck:
-      test: ["CMD", "python", "-m", "star_attendance.service_runner", "check-api"]
-      start_period: 30s
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    env_file:
+      - .env
+    networks:
+      - star-asn-network
+    environment:
+      - "INTERNAL_API_URL=https://api.star-asn.id"
+      - "PROXY_ENABLED=false"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.star-asn.id`)"
+      - "traefik.http.routers.api.entrypoints=web,websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.api.loadbalancer.server.port=11800"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.burst=200"
+      - "traefik.http.routers.api.middlewares=api-ratelimit"
     deploy:
-      replicas: 1
+      replicas: 3
       resources:
         limits:
           cpus: '1'
           memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-      update_config:
-        parallelism: 1
-        delay: 10s
 
   worker:
-    <<: *star-asn-service
+    image: star-asn:latest
     command: worker
+    env_file:
+      - .env
+    networks:
+      - star-asn-network
+    environment:
+      - "INTERNAL_API_URL=http://api:11800"
+      - "PROXY_ENABLED=false"
     deploy:
       replicas: 1
       resources:
@@ -69,10 +73,21 @@ services:
         reservations:
           cpus: '0.4'
           memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
 
   bot:
-    <<: *star-asn-service
+    image: star-asn:latest
     command: bot
+    env_file:
+      - .env
+    networks:
+      - star-asn-network
+    environment:
+      - "INTERNAL_API_URL=http://api:11800"
+      - "PROXY_ENABLED=false"
     deploy:
       replicas: 1
       resources:
@@ -82,96 +97,50 @@ services:
         reservations:
           cpus: '0.4'
           memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
 
-  # --- MONITORING & MANAGEMENT ---
   portainer:
     image: portainer/portainer-ce:latest
-    ports:
-      - "11900:9000"
-      - "11801:8001"
+    networks:
+      - star-asn-network
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
-    networks:
-      - star-asn-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(`admin.star-asn.id`)"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
     deploy:
       placement:
-        constraints: [node.role == manager]
-      restart_policy:
-        condition: on-failure
-    environment:
-      - INITIAL_ADMIN_PASSWORD=Star@ASN2026!
-
-  uptime-kuma:
-    image: louislam/uptime-kuma:latest
-    ports:
-      - "11301:3001"
-    volumes:
-      - uptime_data:/app/data
-    networks:
-      - star-asn-network
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
-    environment:
-      - TZ=Asia/Jakarta
-
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "11090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    networks:
-      - star-asn-network
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
+        constraints: [ node.role == manager ]
 
   grafana:
     image: grafana/grafana:latest
-    ports:
-      - "11300:3000"
+    networks:
+      - star-asn-network
     volumes:
       - grafana_data:/var/lib/grafana
-    networks:
-      - star-asn-network
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=Star@ASN2026!
-      - GF_SECURITY_ADMIN_USER=admin
-
-  loki:
-    image: grafana/loki:latest
-    ports:
-      - "11100:3100"
-    volumes:
-      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
-      - loki_data:/loki
-    networks:
-      - star-asn-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`monitor.star-asn.id`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
     deploy:
       replicas: 1
-      restart_policy:
-        condition: on-failure
-    command: -config.file=/etc/loki/local-config.yaml
 
 networks:
   star-asn-network:
     driver: overlay
+    attachable: true
 
 volumes:
   portainer_data:
-  uptime_data:
-  prometheus_data:
   grafana_data:
-  loki_data:

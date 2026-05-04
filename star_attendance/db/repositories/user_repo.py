@@ -6,7 +6,6 @@ import threading
 import uuid
 from typing import Any, cast
 
-from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
 from star_attendance.core.config import settings
@@ -27,6 +26,7 @@ class UserRepository:
     @staticmethod
     def now_monotonic() -> float:
         import time
+
         return time.monotonic()
 
     def is_cache_valid(self, timestamp: float, ttl_seconds: int) -> bool:
@@ -86,7 +86,14 @@ class UserRepository:
         return str(new_upt.id)
 
     def serialize_user(self, user: Any, db_settings: dict[str, Any] | None = None) -> UserData:
-        from star_attendance.database_manager import DEFAULT_SETTINGS, coerce_bool, coerce_float, coerce_optional_float, normalize_time_value, normalize_workdays
+        from star_attendance.database_manager import (
+            DEFAULT_SETTINGS,
+            coerce_bool,
+            coerce_float,
+            coerce_optional_float,
+            normalize_time_value,
+            normalize_workdays,
+        )
 
         effective_settings = db_settings or DEFAULT_SETTINGS
         upt = getattr(user, "upt", None)
@@ -108,23 +115,28 @@ class UserRepository:
 
         cron_in = normalize_time_value(getattr(user, "cron_in", "07:00"), effective_settings.get("cron_in", "07:00"))
         cron_out = normalize_time_value(getattr(user, "cron_out", "18:00"), effective_settings.get("cron_out", "18:00"))
-        workdays = normalize_workdays(getattr(user, "default_workdays", None), effective_settings.get("default_workdays", "mon-fri"))
+        workdays = normalize_workdays(
+            getattr(user, "default_workdays", None), effective_settings.get("default_workdays", "mon-fri")
+        )
 
-        return cast(UserData, {
-            "nip": str(getattr(user, "nip", "")),
-            "nama": str(getattr(user, "nama", "")),
-            "password": decrypted,
-            "telegram_id": getattr(user, "telegram_id", None),
-            "is_active": is_active,
-            "auto_attendance_active": auto_attendance_active,
-            "cron_in": cron_in,
-            "cron_out": cron_out,
-            "default_workdays": workdays,
-            "personal_latitude": effective_latitude,
-            "personal_longitude": effective_longitude,
-            "upt_id": str(getattr(user, "upt_id", "")) if getattr(user, "upt_id", None) else None,
-            "upt_nama": str(getattr(upt, "nama_upt", "")) if upt else None,
-        })
+        return cast(
+            UserData,
+            {
+                "nip": str(getattr(user, "nip", "")),
+                "nama": str(getattr(user, "nama", "")),
+                "password": decrypted,
+                "telegram_id": getattr(user, "telegram_id", None),
+                "is_active": is_active,
+                "auto_attendance_active": auto_attendance_active,
+                "cron_in": cron_in,
+                "cron_out": cron_out,
+                "default_workdays": workdays,
+                "personal_latitude": effective_latitude,
+                "personal_longitude": effective_longitude,
+                "upt_id": str(getattr(user, "upt_id", "")) if getattr(user, "upt_id", None) else None,
+                "upt_nama": str(getattr(upt, "nama_upt", "")) if upt else None,
+            },
+        )
 
     def get_user_data(self, nip: str) -> UserData | None:
         with self.cache_lock:

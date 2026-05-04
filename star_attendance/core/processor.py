@@ -1,7 +1,6 @@
 import asyncio
 import time
 import uuid
-import json
 from collections.abc import Callable, Coroutine, Mapping
 from typing import Any
 
@@ -48,7 +47,7 @@ def safe_last_success_record(store: Any, nip: str, action: str) -> tuple[Any | N
 
 def resolve_login_error(login_result: Any) -> str:
     """
-    Transforms raw login results and technical exceptions into human-readable 
+    Transforms raw login results and technical exceptions into human-readable
     smart error messages with actionable intelligence.
     """
     if not login_result:
@@ -82,10 +81,10 @@ def resolve_login_error(login_result: Any) -> str:
             return "🛡️ Akses diblokir oleh WAF (403 Forbidden). Cek reputasi IP."
         if "502" in err_str or "503" in err_str or "504" in err_str:
             return "🚧 Portal sedang down atau overload (Gateway Error)."
-        
+
         if failure_stage:
             return f"Login gagal ({failure_stage})"
-        
+
         return "Login gagal. Cek log sistem untuk detail teknis."
 
     # 2. Handle raw string errors (exceptions)
@@ -96,7 +95,7 @@ def resolve_login_error(login_result: Any) -> str:
         return "⏳ Portal Timeout (Curl 28)."
     if "credentials" in err_str:
         return "🔑 NIP atau Password salah."
-    
+
     return f"Gagal: {login_result}"
 
 
@@ -145,14 +144,25 @@ async def process_single_user(
     last_error: str | None = None
     acquired_lock = False
 
-    engine = AttendanceEngine(action=action, nip=nip, status_callback=status_callback, proxy=settings.resolved_proxy_url)
+    # Randomized Jitter for Mass Attendance (to avoid bulk submission fingerprints)
+    if is_mass and settings.MASS_JITTER_MAX > 0:
+        import random
+
+        jitter_delay = random.uniform(1, settings.MASS_JITTER_MAX)
+        log("INFO", f"event=jitter status=waiting duration={jitter_delay:.2f}s", scope=scope)
+        await asyncio.sleep(jitter_delay)
+
+    engine = AttendanceEngine(
+        action=action, nip=nip, status_callback=status_callback, proxy=settings.resolved_proxy_url
+    )
     try:
         if store.has_successful_attendance_today(nip, action):
             from star_attendance.core.timeutils import format_precise_time
+
             recorded_at, _ = safe_last_success_record(store, nip, action)
             time_str = format_precise_time(recorded_at)
             label = get_action_label(action)
-            
+
             store.add_audit_log(nip, action, "skipped", f"Attendance {label} already recorded successfully today.")
 
             # Formatted message for Admin/Logs
@@ -169,6 +179,7 @@ async def process_single_user(
 
             # Send notification to User if they have a Telegram ID
             if user_chat_id:
+                final_msg_id = user_message_id.get("id") if isinstance(user_message_id, dict) else user_message_id
                 notifier.notify_attendance(
                     nip,
                     actual_name,
@@ -179,6 +190,7 @@ async def process_single_user(
                     to_admin=False,
                     to_user=True,
                     user_chat_id=user_chat_id,
+                    user_message_id=final_msg_id,
                     debug_data={
                         "recorded_at": recorded_at,
                         "event_time": recorded_at,
@@ -302,7 +314,7 @@ async def process_single_user(
             action,
             "success" if result else "failed",
             duration=elapsed,
-            to_group=True,
+            to_group=not is_mass,
             to_admin=False,
             to_user=bool(user_chat_id),  # Always notify user if they are registered in bot
             user_chat_id=user_chat_id,
@@ -341,7 +353,7 @@ async def mass_attendance(limit: int | None = None, options: Any = None) -> dict
     """
     store = options.store if getattr(options, "store", None) else get_store()
     users = store.get_users_with_passwords()
-    
+
     if limit:
         users = users[:limit]
 
@@ -359,6 +371,7 @@ async def mass_attendance(limit: int | None = None, options: Any = None) -> dict
 
     # --- "MASTER OF MASTER" PRIMING ---
     from star_attendance.login_handler import LoginHandler
+
     await LoginHandler.prime_waf_globally()
 
     pool = await create_queue_pool()
@@ -366,14 +379,16 @@ async def mass_attendance(limit: int | None = None, options: Any = None) -> dict
 
     count = 0
     # Reset progress indicators for workers
-    store.update_mass_status({
-        "active": "1",
-        "action": action,
-        "pos": "0",
-        "total": str(len(users)),
-        "log": "[]",
-        "start_time": str(time.time())
-    })
+    store.update_mass_status(
+        {
+            "active": "1",
+            "action": action,
+            "pos": "0",
+            "total": str(len(users)),
+            "log": "[]",
+            "start_time": str(time.time()),
+        }
+    )
 
     batch_size = 100
     try:

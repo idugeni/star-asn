@@ -91,7 +91,8 @@ async def help_command(
             "• /start - Dashboard Utama\n"
             "• /absen - Override Absensi Instan\n"
             "• /tambah - Registrasi Manual\n"
-            "• /adduser - Tambah Personel Baru (Admin)\n\n"
+            "• /adduser - Tambah Personel Baru (Admin)\n"
+            "• /status - Cek Kesehatan Portal Star-ASN\n\n"
             "<b>MODUL TELEGRAM CONTROL PLANE:</b>\n"
             "🚀 <b>Aktivasi Masal:</b> Eksekusi absensi seluruh kluster.\n"
             "🌐 <b>Global Settings:</b> Ubah rule global dan default runtime.\n"
@@ -344,3 +345,114 @@ async def manage_upt(
         )
     else:
         await update.message.reply_text("❌ Gagal update UPT.")
+
+
+async def status_portal(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    is_admin_fn: AdminChecker,
+) -> None:
+    if not update.message or not update.effective_user:
+        return
+
+    tid = update.effective_user.id
+    if not is_admin_fn(tid):
+        await update.message.reply_text(
+            "⛔ <b>AKSES DITOLAK</b>\nPerintah ini hanya untuk Administrator.", parse_mode=constants.ParseMode.HTML
+        )
+        return
+
+    import time
+
+    from curl_cffi.requests import AsyncSession
+
+    from star_attendance.login_handler import MASTER_IDENTITY_HEADERS
+
+    status_msg = await update.message.reply_text(
+        "⏳ <b>MENGECEK STATUS PORTAL...</b>", parse_mode=constants.ParseMode.HTML
+    )
+
+    results = []
+    start_time = time.perf_counter()
+
+    async with AsyncSession(timeout=15, impersonate="chrome110") as session:
+        # 1. SSO Endpoint Check
+        try:
+            sso_url = "https://sso-link-dummy.id/realms/dummy/protocol/openid-connect/auth"  # Use actual SSO from config if available
+            r_sso = await session.get(sso_url, headers=MASTER_IDENTITY_HEADERS)
+            sso_status = "✅ ONLINE" if r_sso.status_code < 400 else f"⚠️ {r_sso.status_code}"
+        except Exception as e:
+            sso_status = f"❌ OFFLINE ({str(e)[:20]})"
+        results.append(f"🔐 <b>SSO GATEWAY:</b> <code>{sso_status}</code>")
+
+        # 2. Star ASN Dashboard Check
+        try:
+            r_portal = await session.get("https://starasn.example.id/login", headers=MASTER_IDENTITY_HEADERS)
+            portal_status = "✅ ONLINE" if r_portal.status_code == 200 else f"⚠️ {r_portal.status_code}"
+
+            # WAF Check
+            is_waf = "waf_token" in r_portal.text or "Checking your browser" in r_portal.text
+            waf_status = "🛡️ ACTIVE" if is_waf else "🟢 CLEAR"
+        except Exception:
+            portal_status = "❌ OFFLINE"
+            waf_status = "❓ UNKNOWN"
+
+        results.append(f"🏢 <b>STAR-ASN PORTAL:</b> <code>{portal_status}</code>")
+        results.append(f"🛡️ <b>WAF SECURITY:</b> <code>{waf_status}</code>")
+
+        # 3. Network Metrics
+        try:
+            r_ip = await session.get("https://api.ipify.org?format=json")
+            ip = r_ip.json().get("ip", "N/A")
+        except:
+            ip = "N/A"
+
+        elapsed = time.perf_counter() - start_time
+        results.append(f"📡 <b>WORKER IP:</b> <code>{ip}</code>")
+        results.append(f"⚡ <b>LATENCY:</b> <code>{elapsed:.2f}s</code>")
+
+    report = (
+        "<b>📊 LAPORAN KESEHATAN PORTAL</b>\n"
+        "────────────────\n" + "\n".join(results) + "\n────────────────\n"
+        "<i>Sistem siap untuk eksekusi terjadwal.</i>"
+    )
+
+    await status_msg.edit_text(report, parse_mode=constants.ParseMode.HTML)
+
+
+async def clean_command(update: Update, context: ContextTypes.DEFAULT_TYPE, *, store: Any) -> None:
+    if not update.effective_chat or not update.effective_user or not update.message:
+        return
+
+    # Delete the incoming /clean command immediately
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    chat_id = update.effective_chat.id
+    current_id = update.message.message_id
+
+    from star_attendance.bot.cleanup import clear_chat_history
+    await clear_chat_history(chat_id, context.application)
+
+    # Robust fallback: sweep previous message_ids that might not be recorded
+    for m_id in range(current_id - 1, max(0, current_id - 50), -1):
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=m_id)
+            await asyncio.sleep(0.02)
+        except Exception:
+            pass
+
+    # Send a new message that will delete itself after 10 seconds
+    reply = await context.bot.send_message(
+        chat_id=chat_id,
+        text="<b>✅ Riwayat chat berhasil dibersihkan!</b>",
+        parse_mode=constants.ParseMode.HTML,
+    )
+
+    from star_attendance.bot.cleanup import delete_after
+    await delete_after(reply, delay=10)
+
+

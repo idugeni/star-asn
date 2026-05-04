@@ -3,7 +3,7 @@ import logging
 import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlparse
 
 import asyncpg
@@ -26,8 +26,7 @@ from star_attendance.core.exceptions import (
 from star_attendance.db.bootstrap import apply_pending_migrations, verify_runtime_schema
 from star_attendance.runtime import get_store
 
-if TYPE_CHECKING:
-    from asyncpg import Connection
+from asyncpg import Connection
 
 from star_attendance.core.logging_config import configure_structlog
 from star_attendance.core.tracing import instrument_fastapi, instrument_httpx, instrument_asyncpg, setup_tracing
@@ -195,9 +194,9 @@ async def star_asn_error_handler(request: Request, exc: StarAsnError) -> JSONRes
 
 
 @asynccontextmanager
-async def get_db_connection() -> AsyncGenerator[Connection, None]:
+async def get_db_connection() -> AsyncGenerator["Connection", None]:
     """Get a database connection with proper cleanup."""
-    conn: Connection | None = None
+    conn: "Connection | None" = None
     try:
         conn = await asyncpg.connect(settings.POSTGRES_URL, statement_cache_size=0)
         yield conn

@@ -20,6 +20,7 @@ WORKDAY_OPTIONS = [["Senin-Jumat"], ["Senin-Sabtu"], ["Setiap Hari"], ["❌ Bata
 IN_TIME_OPTIONS = [["07:00", "07:30", "08:00"], ["08:30", "09:00", "❌ Batal"]]
 OUT_TIME_OPTIONS = [["16:00", "16:30", "17:00"], ["17:30", "18:00", "❌ Batal"]]
 SKIP_LOCATION_CHOICES = {"Lewati", "⏩ Lewati", "LEWATI", "⏩ LEWATI", "❌ Batal"}
+MANUAL_INPUT_KEYWORD = "✏️ Input Manual"
 
 
 def _clear_settings_cache(user_cache: dict[str, Any]) -> None:
@@ -114,7 +115,11 @@ async def start_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer()
 
     keyboard = ReplyKeyboardMarkup(
-        [[KeyboardButton("📍 Ambil Lokasi Saya Sekarang", request_location=True)], [KeyboardButton("❌ Batal")]],
+        [
+            [KeyboardButton("📍 Dapatkan Lokasi Saya", request_location=True)],
+            [KeyboardButton("✏️ Input Manual")],
+            [KeyboardButton("❌ Batal")],
+        ],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
@@ -123,9 +128,9 @@ async def start_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "📍 <b>PENGATURAN LOKASI GPS</b>\n────────────────\n"
         "Silakan kirimkan lokasi Anda untuk akurasi absensi.\n\n"
         "💡 <b>Pilihan:</b>\n"
-        "1. Klik tombol <b>📍 Ambil Lokasi</b> di bawah (Paling Akurat).\n"
-        "2. Kirimkan pesan teks dengan format <code>lat, lon</code>.\n"
-        "   Contoh: <code>-6.123, 106.456</code>"
+        "1. Klik <b>📍 Dapatkan Lokasi</b> — ambil lokasi realtime dari perangkat (Paling Akurat).\n"
+        "2. Klik <b>✏️ Input Manual</b> — masukkan koordinat secara manual jika tidak berada di lokasi.\n"
+        "3. Ketik langsung format <code>lat, lon</code>. Contoh: <code>-6.123, 106.456</code>"
     )
 
     if query and isinstance(query.message, Message):
@@ -205,13 +210,18 @@ async def set_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_cache = cast(dict[str, Any], context.user_data)
     user_cache["set_workdays"] = workdays
 
-    keyboard = [[KeyboardButton("📍 BAGIKAN LOKASI GPS", request_location=True)], [KeyboardButton("⏩ LEWATI")]]
+    keyboard = [
+        [KeyboardButton("📍 Dapatkan Lokasi Saya", request_location=True)],
+        [KeyboardButton("✏️ Input Manual")],
+        [KeyboardButton("⏩ LEWATI")],
+    ]
     await update.message.reply_text(
         "📍 <b>PENGATURAN LOKASI</b>\n────────────────\n"
         "Bot dapat melakukan absen menggunakan titik koordinat khusus jika diperlukan.\n\n"
-        "1. Klik tombol di bawah untuk kirim lokasi GPS,\n"
-        "2. Ketik koordinat manual (contoh: <code>-6.2146, 106.8451</code>),\n"
-        "3. Klik <b>Lewati</b> jika ingin menggunakan lokasi default kantor/UPT.",
+        "1. Klik <b>📍 Dapatkan Lokasi</b> — ambil lokasi realtime dari perangkat (Paling Akurat).\n"
+        "2. Klik <b>✏️ Input Manual</b> — masukkan koordinat manual jika tidak berada di lokasi.\n"
+        "3. Ketik langsung format <code>lat, lon</code>. Contoh: <code>-6.2146, 106.8451</code>\n"
+        "4. Klik <b>Lewati</b> jika ingin menggunakan lokasi default kantor/UPT.",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
     )
@@ -245,6 +255,14 @@ async def set_loc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         if raw_text in SKIP_LOCATION_CHOICES:
             settings_update["personal_latitude"] = None
             settings_update["personal_longitude"] = None
+        elif raw_text == MANUAL_INPUT_KEYWORD:
+            await update.message.reply_text(
+                "✏️ <b>INPUT MANUAL LOKASI</b>\n────────────────\n"
+                "Ketik koordinat dalam format <code>latitude, longitude</code>\n"
+                "Contoh: <code>-6.2146, 106.8451</code>",
+                parse_mode="HTML",
+            )
+            return WAIT_SET_LOC
         else:
             try:
                 latitude, longitude = [float(part.strip()) for part in raw_text.split(",", maxsplit=1)]
@@ -254,7 +272,8 @@ async def set_loc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 settings_update["personal_longitude"] = longitude
             except Exception:
                 await update.message.reply_text(
-                    "❌ Format koordinat tidak valid. Gunakan format <code>latitude, longitude</code>.",
+                    "❌ Format koordinat tidak valid. Gunakan format <code>latitude, longitude</code>.\n"
+                    "Contoh: <code>-6.2146, 106.8451</code>",
                     parse_mode="HTML",
                 )
                 return WAIT_SET_LOC

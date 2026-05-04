@@ -5,14 +5,14 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import String, func, text, cast as sa_cast
+from sqlalchemy import String, func, text
+from sqlalchemy import cast as sa_cast
 
 from star_attendance.core.config import settings
 from star_attendance.core.timeutils import (
     format_formal_timestamp,
     isoformat_local,
     local_day_bounds,
-    now_storage,
     now_utc,
     to_local,
 )
@@ -100,15 +100,15 @@ class AuditRepository:
         with db_manager.get_session() as session:
             rows = (
                 session.query(
-                    sa_cast(AuditLog.action, String).label("action_str"),
+                    AuditLog.action.label("action_str"),
                     func.max(AuditLog.timestamp).label("latest_timestamp"),
                 )
                 .filter(
                     AuditLog.nip == nip,
                     AuditLog.status.in_(["success", "ok"]),
-                    sa_cast(AuditLog.action, String).in_(["in", "out", "checkin", "checkout"]),
+                    AuditLog.action.in_([AuditAction.in_, AuditAction.out, AuditAction.checkin, AuditAction.checkout]),
                 )
-                .group_by(text("action_str"))
+                .group_by(AuditLog.action)
                 .all()
             )
 
@@ -235,16 +235,16 @@ class AuditRepository:
         with db_manager.get_session() as session:
             rows = (
                 session.query(
-                    sa_cast(AuditLog.action, String).label("action_str"),
-                    sa_cast(AuditLog.status, String).label("status_str"),
+                    AuditLog.action.label("action_str"),
+                    AuditLog.status.label("status_str"),
                     func.count(AuditLog.id).label("count"),
                 )
                 .filter(
                     AuditLog.timestamp >= start_utc,
                     AuditLog.timestamp < end_utc,
-                    sa_cast(AuditLog.action, String).in_(["in", "out", "checkin", "checkout"]),
+                    AuditLog.action.in_([AuditAction.in_, AuditAction.out, AuditAction.checkin, AuditAction.checkout]),
                 )
-                .group_by(text("action_str"), text("status_str"))
+                .group_by(AuditLog.action, AuditLog.status)
                 .all()
             )
 
@@ -278,13 +278,13 @@ class AuditRepository:
         with db_manager.get_session() as session:
             rows = (
                 session.query(
-                    sa_cast(AuditLog.action, String).label("action_str"),
-                    sa_cast(AuditLog.status, String).label("status_str"),
+                    AuditLog.action.label("action_str"),
+                    AuditLog.status.label("status_str"),
                     func.count(AuditLog.id).label("count"),
                     func.avg(AuditLog.response_time).label("avg_response_time"),
                 )
                 .filter(AuditLog.timestamp >= window_start)
-                .group_by(text("action_str"), text("status_str"))
+                .group_by(AuditLog.action, AuditLog.status)
                 .all()
             )
             try:
@@ -364,7 +364,7 @@ class AuditRepository:
                 session.query(AuditLog.id)
                 .filter(
                     AuditLog.nip == nip,
-                    sa_cast(AuditLog.action, String).in_(action_variants),
+                    AuditLog.action.in_([AuditAction(v) for v in action_variants]),
                     AuditLog.status.in_(["success", "ok"]),
                     AuditLog.timestamp >= start_utc,
                     AuditLog.timestamp < end_utc,

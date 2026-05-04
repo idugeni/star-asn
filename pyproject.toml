@@ -33,7 +33,7 @@ dependencies = [
     "python-telegram-bot",
     "curl_cffi",
     "ddddocr",
-    "apscheduler",
+    "apscheduler>=4.0.0a4",
     "pydantic-settings",
     "playwright",
     "psutil",

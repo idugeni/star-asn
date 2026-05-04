@@ -200,7 +200,7 @@ export const UserDashboard = ({ user, activeTab, logs, stats, userLocation }: Us
                                 <motion.div initial={{ width: 0 }} animate={{ width: '99.8%' }} className="h-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
                             </div>
                         </div>
-                        <Button variant="outline" className="w-full h-14 text-[10px] font-black uppercase tracking-[0.3em] border-white/10 bg-white/5 hover:bg-white/10 rounded-2xl">
+                        <Button variant="outline" className="w-full h-8 text-[9px] font-black uppercase tracking-[0.2em] border-white/10 bg-white/5 hover:bg-white/10 rounded-xl">
                             Recalibrate Neural Hash
                         </Button>
                     </div>
@@ -301,11 +301,11 @@ export const UserDashboard = ({ user, activeTab, logs, stats, userLocation }: Us
                         <Button 
                             disabled={isTriggering || !isInRange}
                             onClick={handlePresensi}
-                            className="w-full h-20 rounded-[30px] font-black uppercase tracking-[0.4em] text-xs shadow-2xl shadow-primary/40 hover:shadow-primary/60 transition-all hover:scale-[1.02] active:scale-[0.98] relative overflow-hidden group disabled:grayscale disabled:opacity-40"
+                            className="w-full h-10 rounded-xl font-black uppercase tracking-[0.2em] text-[10px] shadow-xl shadow-primary/30 hover:shadow-primary/50 transition-all hover:scale-[1.02] active:scale-[0.98] relative overflow-hidden group disabled:grayscale disabled:opacity-40"
                         >
                             <div className="absolute inset-0 bg-gradient-to-r from-primary to-blue-400 group-hover:opacity-90 transition-opacity" />
                             <div className="relative flex items-center justify-center">
-                                <RiScan2Line className={cn("mr-4 h-6 w-6 transition-transform group-hover:scale-110", isTriggering && "animate-spin")} /> 
+                                <RiScan2Line className={cn("mr-3 h-4 w-4 transition-transform group-hover:scale-110", isTriggering && "animate-spin")} /> 
                                 {isTriggering ? 'TRANSMITTING...' : 'INITIALIZE_EXEC'}
                             </div>
                         </Button>

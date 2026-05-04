@@ -21,12 +21,6 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Separate vendor chunks for better caching
-          'react-vendor': ['react', 'react-dom'],
-          'ui-vendor': ['lucide-react', 'radix-ui'],
-          'utils': ['sonner', 'class-variance-authority', 'clsx', 'tailwind-merge'],
-        },
         // Optimize chunk size
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',

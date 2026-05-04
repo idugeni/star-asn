@@ -27,11 +27,14 @@ class BotMessageRepository:
         threshold = now_storage() - timedelta(hours=hours)
         with db_manager.get_session() as session:
             msgs = session.query(BotMessage).filter(BotMessage.created_at < threshold).limit(100).all()
-            return [
-                {"id": m.id, "chat_id": m.chat_id, "message_id": m.message_id}
-                for m in msgs
-            ]
+            return [{"id": m.id, "chat_id": m.chat_id, "message_id": m.message_id} for m in msgs]
+
+    def get_all_bot_messages_for_chat(self, chat_id: int) -> list[dict[str, Any]]:
+        with db_manager.get_session() as session:
+            msgs = session.query(BotMessage).filter(BotMessage.chat_id == chat_id).all()
+            return [{"id": m.id, "chat_id": m.chat_id, "message_id": m.message_id} for m in msgs]
 
     def delete_bot_message_record(self, record_id: Any) -> None:
         with db_manager.get_session() as session:
             session.query(BotMessage).filter(BotMessage.id == record_id).delete()
+

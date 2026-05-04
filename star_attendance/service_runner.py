@@ -6,20 +6,20 @@ import logging
 import os
 import sys
 import time
-import asyncio
-import httpx
 from collections.abc import Callable
 from typing import TypeVar
 
+import httpx
+
 from star_attendance.core.exceptions import ConfigurationError, MissingEnvironmentVariableError
-from star_attendance.core.logging_config import configure_structlog, get_logger
+from star_attendance.core.logging_config import configure_structlog
 
 T = TypeVar("T")
 
 SERVICE_TARGETS: dict[str, str] = {
     "bootstrap": "star_attendance.bootstrap_db:main",
     "api": "api.main:start_api",
-    "api-full": "api.main:start_api", # Special handling in run_service
+    "api-full": "api.main:start_api",  # Special handling in run_service
     "worker": "star_attendance.worker_pg:run",
     "bot": "star_attendance.telegram_bot:main",
 }
@@ -97,10 +97,7 @@ def require_env(command: str) -> None:
     missing = [name for name in required if not os.getenv(name)]
     if missing:
         for var_name in missing:
-            raise MissingEnvironmentVariableError(
-                var_name,
-                details={"command": command, "all_missing": missing}
-            )
+            raise MissingEnvironmentVariableError(var_name, details={"command": command, "all_missing": missing})
 
 
 def resolve_retry_settings() -> tuple[int, float]:

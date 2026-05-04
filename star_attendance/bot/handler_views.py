@@ -1,15 +1,14 @@
 from __future__ import annotations
+
+import html
 import os
-import psutil
 import socket
 import time
-import html
-from datetime import datetime, timedelta
-
 from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any
 
+import psutil
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, constants
 
 from star_attendance.bot.ui import get_back_button
@@ -51,7 +50,7 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
         last_out_str = format_formal_timestamp(last_actions.get("out")) if last_actions.get("out") else "BELUM ADA"
         telegram_id = user.get("telegram_id") or "-"
         auto_status = "🟢 AKTIF" if user.get("auto_attendance_active") else "🔴 NONAKTIF"
-        
+
         body = (
             "👤 <b>PROFIL DIGITAL ASN</b>\n"
             f"  ├ NAMA: <code>{esc(user['nama'])}</code>\n"
@@ -85,11 +84,12 @@ def build_dashboard_message(user: UserPayload | None, *, store: Any) -> str:
 
 def build_startup_dashboard(metrics: dict[str, Any]) -> str:
     node_id = socket.gethostname()
-    
+
     # Safe IP Fetch
     public_ip = "UNKNOWN"
     try:
         import httpx
+
         public_ip = httpx.get("https://api.ipify.org", timeout=10).text.strip()
     except Exception:
         pass
@@ -98,16 +98,16 @@ def build_startup_dashboard(metrics: dict[str, Any]) -> str:
     try:
         proc = psutil.Process(os.getpid())
         # First call might return 0, we use a slight interval for accuracy
-        proc_cpu = proc.cpu_percent(interval=0.1) 
+        proc_cpu = proc.cpu_percent(interval=None)
         # System-wide CPU is often more interesting for the admin
-        system_cpu = psutil.cpu_percent(interval=0.5)
-        mem_info = proc.memory_info().rss / (1024 * 1024) # MB
+        system_cpu = psutil.cpu_percent(interval=None)
+        mem_info = proc.memory_info().rss / (1024 * 1024)  # MB
     except Exception:
         proc_cpu = 0.0
         system_cpu = 0.0
         mem_info = 0.0
     ram_pct = psutil.virtual_memory().percent
-    
+
     # Process Uptime
     try:
         proc = psutil.Process(os.getpid())
@@ -122,7 +122,7 @@ def build_startup_dashboard(metrics: dict[str, Any]) -> str:
             uptime_str = f"{hours} jam {minutes} menit"
     except:
         uptime_str = "0 detik"
-    
+
     db_status = metrics.get("db_provider", "Disconnected")
     if metrics.get("active_personnel", 0) > 0:
         db_status = f"CONNECTED ({db_status})"
@@ -138,13 +138,13 @@ def build_startup_dashboard(metrics: dict[str, Any]) -> str:
         f"🕒 <b>UPTIME:</b> {uptime_str}\n"
         f"🗄 <b>DB:</b> <code>{db_status}</code>"
     )
-    
+
     section2 = (
         f"👥 <b>PERSONNEL:</b> <code>{metrics.get('active_personnel', 0)} Active</code>\n"
         f"🤖 <b>MANAGED:</b> <code>{metrics.get('managed_personnel', 0)} Scheduled</code>\n"
         f"✅ <b>TODAY:</b> <code>{metrics.get('success_today', 0)} Successes</code>"
     )
-    
+
     return (
         f"{header}\n"
         "────────────────\n"
@@ -266,12 +266,10 @@ def build_user_manage_keyboard(nip: str) -> InlineKeyboardMarkup:
 def build_manage_user_message(user: UserPayload) -> str:
     loc_indicator = "MANDIRI" if user.get("location_source") == "personal" else "SISTEM"
     sched_indicator = (
-        "KHUSUS"
-        if user.get("cron_in_source") == "personal" or user.get("cron_out_source") == "personal"
-        else "STANDAR"
+        "KHUSUS" if user.get("cron_in_source") == "personal" or user.get("cron_out_source") == "personal" else "STANDAR"
     )
     work_indicator = "KHUSUS" if user.get("workdays_source") == "personal" else "GLOBAL"
-    
+
     try:
         lat = user.get("latitude")
         lon = user.get("longitude")

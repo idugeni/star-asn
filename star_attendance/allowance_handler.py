@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from typing import Any, cast
 
 from bs4 import BeautifulSoup
@@ -163,7 +163,9 @@ class AllowanceHandler:
     @classmethod
     def parse_period_options(cls, html: str, year: int) -> list[AllowancePeriodOption]:
         soup = BeautifulSoup(html, "html.parser")
-        select = soup.find("select", id="allowance_period_code") or soup.find("select", attrs={"name": "allowance_period_code"})
+        select = soup.find("select", id="allowance_period_code") or soup.find(
+            "select", attrs={"name": "allowance_period_code"}
+        )
         if not select:
             return cls.build_fallback_period_options(year)
 
@@ -309,8 +311,14 @@ class AllowanceHandler:
             payload = None
 
         if response.status_code != 200:
-            message = str(payload.get("message") or f"Data fetch failure: HTTP {response.status_code}") if payload else f"Data fetch failure: HTTP {response.status_code}"
-            failure_stage = "period_unavailable" if self.is_period_unavailable_message(message) else "allowance_fetch_failed"
+            message = (
+                str(payload.get("message") or f"Data fetch failure: HTTP {response.status_code}")
+                if payload
+                else f"Data fetch failure: HTTP {response.status_code}"
+            )
+            failure_stage = (
+                "period_unavailable" if self.is_period_unavailable_message(message) else "allowance_fetch_failed"
+            )
             return {
                 "status": "failed",
                 "message": message,
@@ -328,7 +336,9 @@ class AllowanceHandler:
 
         if str(payload.get("status") or "").lower() != "success" and "data" not in payload:
             message = str(payload.get("message") or "Data tunjangan tidak tersedia.")
-            failure_stage = "period_unavailable" if self.is_period_unavailable_message(message) else "allowance_fetch_failed"
+            failure_stage = (
+                "period_unavailable" if self.is_period_unavailable_message(message) else "allowance_fetch_failed"
+            )
             return {
                 "status": "failed",
                 "message": message,

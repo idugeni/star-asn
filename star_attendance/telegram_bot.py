@@ -8,14 +8,13 @@ warnings.filterwarnings("ignore", category=PTBUserWarning)
 
 from telegram import BotCommand, MenuButtonWebApp, WebAppInfo
 from telegram.ext import (
-    Application,
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
     ConversationHandler,
+    ExtBot,
     MessageHandler,
     filters,
-    ExtBot,
 )
 
 # Import our modular components
@@ -31,10 +30,8 @@ from star_attendance.bot.constants import (
     WAIT_ADMIN_INPUT_VAL,
     WAIT_BROADCAST_MSG,
     WAIT_MAN_ACTION,
-    WAIT_REG_NAME,
     WAIT_REG_NIP,
     WAIT_REG_PASS,
-    WAIT_REG_UPT,
     WAIT_SEARCH_QUERY,
     WAIT_SET_DAYS,
     WAIT_SET_IN,
@@ -74,6 +71,7 @@ from star_attendance.bot.conversations import (
 )
 from star_attendance.bot.handlers import (
     absen_manual,
+    clean_command,
     handle_callback,
     help_command,
     manage_hapus,
@@ -83,6 +81,7 @@ from star_attendance.bot.handlers import (
     manage_upt,
     profil_command,
     start,
+    status_portal,
 )
 from star_attendance.core.config import settings
 from star_attendance.db.bootstrap import apply_pending_migrations, verify_runtime_schema
@@ -93,11 +92,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-import time
 
-import psutil
-
-from star_attendance.notifier import notifier
 from star_attendance.runtime import get_store
 
 store = get_store()
@@ -134,6 +129,7 @@ async def post_init(application):
                 BotCommand("workdays", "🗓 Hari Auto Absen"),
                 BotCommand("location", "📍 Lokasi GPS"),
                 BotCommand("manual", "🕹 Absensi Instan"),
+                BotCommand("status", "📊 Status Portal"),
                 BotCommand("help", "📖 Bantuan"),
             ]
         )
@@ -157,6 +153,7 @@ async def post_init(application):
     logger.info("Generating system readiness dashboard...")
     try:
         from star_attendance.bot.handler_views import build_startup_dashboard
+
         metrics = store.get_system_metrics()
         dashboard_msg = build_startup_dashboard(metrics)
 
@@ -165,6 +162,7 @@ async def post_init(application):
             await asyncio.sleep(2)  # Give app time to start polling
             try:
                 from star_attendance.notifier import notifier
+
                 notifier.send_message(dashboard_msg, to_admin=False, to_group=True)
                 logger.info("Startup telemetry dashboard sent successfully.")
             except Exception as e:
@@ -175,22 +173,26 @@ async def post_init(application):
         logger.error(f"Failed during startup telemetry collection: {e}", exc_info=True)
 
     from star_attendance.bot.cleanup import start_global_cleanup_task
+
     asyncio.create_task(start_global_cleanup_task(application))
-    
+
     logger.info("post-init completed")
 
 
 class RecordedBot(ExtBot):
     """Custom Bot class that automatically records sent messages for auto-cleanup."""
+
     async def send_message(self, *args, **kwargs):
         msg = await super().send_message(*args, **kwargs)
         from star_attendance.bot.cleanup import record_message
+
         asyncio.create_task(record_message(msg))
         return msg
 
     async def send_photo(self, *args, **kwargs):
         msg = await super().send_photo(*args, **kwargs)
         from star_attendance.bot.cleanup import record_message
+
         asyncio.create_task(record_message(msg))
         return msg
 
@@ -328,6 +330,9 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("profil", profil_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("status", status_portal))
+    app.add_handler(CommandHandler("clean", clean_command))
+
 
     # Hidden / Legacy CMDs (Admin only, not in menu)
     app.add_handler(CommandHandler("absen", absen_manual))

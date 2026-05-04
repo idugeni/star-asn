@@ -158,12 +158,7 @@ class AttendanceError(BusinessLogicError):
     """Raised when attendance processing fails."""
 
     def __init__(
-        self,
-        message: str,
-        *,
-        nip: str | None = None,
-        action: str | None = None,
-        details: dict[str, Any] | None = None
+        self, message: str, *, nip: str | None = None, action: str | None = None, details: dict[str, Any] | None = None
     ) -> None:
         super().__init__(message, details=details)
         self.nip = nip
@@ -176,13 +171,7 @@ class AttendanceError(BusinessLogicError):
 class ValidationError(StarAsnError):
     """Raised when input validation fails."""
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        field: str | None = None,
-        details: dict[str, Any] | None = None
-    ) -> None:
+    def __init__(self, message: str, *, field: str | None = None, details: dict[str, Any] | None = None) -> None:
         super().__init__(message, details=details)
         self.field = field
 

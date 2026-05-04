@@ -9,8 +9,8 @@ If not set, tracing is disabled (no-op tracer).
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 
 logger = logging.getLogger("otel")
 
@@ -28,16 +28,18 @@ def setup_tracing(service_name: str = "star-asn") -> None:
 
     try:
         from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
-        resource = Resource.create({
-            "service.name": service_name,
-            "service.version": "1.0.0",
-            "deployment.environment": os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT", "production"),
-        })
+        resource = Resource.create(
+            {
+                "service.name": service_name,
+                "service.version": "1.0.0",
+                "deployment.environment": os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT", "production"),
+            }
+        )
 
         provider = TracerProvider(resource=resource)
         exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
@@ -56,6 +58,7 @@ def instrument_fastapi(app: object) -> None:
     """Instrument a FastAPI application with OpenTelemetry."""
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
         FastAPIInstrumentor.instrument_app(app)  # type: ignore
         logger.info("OpenTelemetry: FastAPI instrumented.")
     except ImportError:
@@ -68,6 +71,7 @@ def instrument_httpx() -> None:
     """Instrument httpx client with OpenTelemetry."""
     try:
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
         HTTPXClientInstrumentor().instrument()  # type: ignore
         logger.info("OpenTelemetry: httpx instrumented.")
     except ImportError:
@@ -80,6 +84,7 @@ def instrument_asyncpg() -> None:
     """Instrument asyncpg with OpenTelemetry."""
     try:
         from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
+
         AsyncPGInstrumentor().instrument()  # type: ignore
         logger.info("OpenTelemetry: asyncpg instrumented.")
     except ImportError:

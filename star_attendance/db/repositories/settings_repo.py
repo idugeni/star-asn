@@ -15,7 +15,6 @@ from star_attendance.core.timeutils import local_date, now_utc
 from star_attendance.db.manager import db_manager
 from star_attendance.db.models import GlobalSetting
 
-
 DEFAULT_LOCATION_LATITUDE = -6.2210973
 DEFAULT_LOCATION_LONGITUDE = 106.8314724
 DEFAULT_WORKDAYS = "mon-fri"
@@ -184,7 +183,9 @@ class SettingsRepository:
             logs = logs[:5]
 
             session.execute(
-                text("INSERT INTO settings (key, value) VALUES ('mass_log', :val) ON CONFLICT (key) DO UPDATE SET value = :val"),
+                text(
+                    "INSERT INTO settings (key, value) VALUES ('mass_log', :val) ON CONFLICT (key) DO UPDATE SET value = :val"
+                ),
                 {"val": json.dumps(logs)},
             )
             session.commit()

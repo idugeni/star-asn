@@ -54,17 +54,51 @@ async def main():
         try:
             result, _ = await process_single_user(user_data, options, 1, 1, is_mass=True)
             logger.info(f"event=task_complete nip={nip} success={result} request_key={request_key}")
-            
-            # Real-time UI updates
+
+            # Real-time UI updates + log group notification per user
             if source == "mass_dispatch":
-                store.increment_mass_pos()
+                pos = store.increment_mass_pos()
+                mass_status = store.get_mass_status()
+                total = int(mass_status.get("total", 0))
                 store.add_mass_log(nip, user_data.get("nama", "Unknown"), "success" if result else "failed")
-                
+
+                # Send per-user progress notification to log group
+                try:
+                    from star_attendance.notifier import notifier
+
+                    notifier.send_mass_user_progress(
+                        nip=nip,
+                        name=user_data.get("nama", "Unknown"),
+                        action=action,
+                        status="success" if result else "failed",
+                        position=pos,
+                        total=total,
+                    )
+                except Exception:
+                    pass
+
         except Exception as e:
             logger.error(f"event=task_error nip={nip} request_key={request_key} error={e}")
             if source == "mass_dispatch":
-                store.increment_mass_pos()
+                pos = store.increment_mass_pos()
+                mass_status = store.get_mass_status()
+                total = int(mass_status.get("total", 0))
                 store.add_mass_log(nip, user_data.get("nama", "Unknown"), "failed")
+
+                # Send per-user progress notification to log group
+                try:
+                    from star_attendance.notifier import notifier
+
+                    notifier.send_mass_user_progress(
+                        nip=nip,
+                        name=user_data.get("nama", "Unknown"),
+                        action=action,
+                        status="failed",
+                        position=pos,
+                        total=total,
+                    )
+                except Exception:
+                    pass
 
     logger.info("Worker Cluster Online. Listening for PostgreSQL notifications...")
     try:

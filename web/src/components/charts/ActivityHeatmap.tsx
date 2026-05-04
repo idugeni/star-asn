@@ -44,7 +44,8 @@ export const ActivityHeatmap = ({ data }: ActivityHeatmapProps) => {
         for (let i = 51; i >= 0; i--) {
             const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (i * 7));
             const monthLabel = date.toLocaleString('default', { month: 'short' });
-            if (headers.length === 0 || headers[headers.length - 1].label !== monthLabel) {
+            const prevHeader = headers[headers.length - 1];
+            if (headers.length === 0 || (prevHeader && prevHeader.label !== monthLabel)) {
                 headers.push({ label: monthLabel, weekIndex: 51 - i });
             }
         }

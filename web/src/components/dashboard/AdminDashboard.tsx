@@ -303,8 +303,8 @@ export const AdminDashboard = ({ _user, activeTab, users, stats, logs }: AdminDa
                     </div>
                     
                     <div className="grid grid-cols-2 gap-4">
-                        <Button className="h-14 font-black uppercase tracking-[0.2em] text-[9px] rounded-2xl shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all bg-primary" onClick={triggerSync}>Restart Engine</Button>
-                        <Button variant="secondary" className="h-14 font-black uppercase tracking-[0.2em] text-[9px] rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10" onClick={() => toast.success('Cache Flushed')}>Purge Cache</Button>
+                        <Button className="h-9 font-black uppercase tracking-[0.2em] text-[9px] rounded-xl shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all bg-primary" onClick={triggerSync}>Restart Engine</Button>
+                        <Button variant="secondary" className="h-9 font-black uppercase tracking-[0.2em] text-[9px] rounded-xl bg-white/5 border border-white/10 hover:bg-white/10" onClick={() => toast.success('Cache Flushed')}>Purge Cache</Button>
                     </div>
                 </Card>
 
@@ -365,7 +365,7 @@ export const AdminDashboard = ({ _user, activeTab, users, stats, logs }: AdminDa
                         
                         <Button 
                             onClick={triggerSync} 
-                            className="w-full h-16 rounded-[20px] font-black uppercase tracking-[0.3em] text-[10px] shadow-xl shadow-primary/30 hover:shadow-primary/50 transition-all active:scale-[0.98] relative overflow-hidden group"
+                            className="w-full h-10 rounded-xl font-black uppercase tracking-[0.2em] text-[10px] shadow-xl shadow-primary/30 hover:shadow-primary/50 transition-all active:scale-[0.98] relative overflow-hidden group"
                         >
                             <div className="absolute inset-0 bg-gradient-to-r from-primary to-blue-400 group-hover:opacity-90 transition-opacity" />
                             <div className="relative flex items-center justify-center">

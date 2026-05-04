@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from star_attendance.core.config import settings
 
 if TYPE_CHECKING:
-    from star_attendance.db.models import Base
+    pass
 
 
 class DBManager:

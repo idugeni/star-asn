@@ -127,3 +127,8 @@ FINAL_AUDIT_REPORT.md
 # === Archived Notes ===
 notes/
 
+# === Secrets & Let's Encrypt ===
+letsencrypt/
+acme.json
+
+

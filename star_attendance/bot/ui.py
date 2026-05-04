@@ -119,6 +119,14 @@ async def get_main_menu(telegram_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+async def get_dashboard_text(telegram_id: int) -> str:
+    """Build the dashboard message text for a given telegram_id."""
+    from star_attendance.bot.handler_views import build_dashboard_message
+
+    user = store.get_user_by_telegram_id(telegram_id)
+    return build_dashboard_message(user, store=store)
+
+
 def get_settings_menu() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton("⏰ UBAH JADWAL ABSEN", callback_data="start_schedule")],

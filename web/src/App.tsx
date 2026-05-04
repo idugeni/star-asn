@@ -170,8 +170,9 @@ export default function App() {
                             setAttendanceLog(prev => [newLog, ...prev].slice(0, 100));
                             setStats(s => {
                                 const newActivity = [...(s.activity ?? [])];
-                                if (newActivity.length > 0) {
-                                    newActivity[newActivity.length - 1] += 1;
+                                const lastIdx = newActivity.length - 1;
+                                if (lastIdx >= 0) {
+                                    newActivity[lastIdx] = (newActivity[lastIdx] ?? 0) + 1;
                                 }
                                 return { ...s, activity: newActivity, total: s.total + 1 };
                             });
@@ -254,7 +255,7 @@ export default function App() {
                         animate="animate"
                         exit="exit"
                         transition={{ duration: 0.3 }}
-                        className="max-w-[480px] mx-auto w-full min-h-full px-6 flex flex-col justify-start pt-6 pb-6"
+                        className="max-w-[480px] mx-auto w-full min-h-full px-8 flex flex-col justify-start pt-6 pb-6"
                     >
                         {error ? (
                             <AuthError error={error} />

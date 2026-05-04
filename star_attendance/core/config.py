@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # --- GEOCODING ---
     GOAPI_KEY: str | None = None  # GoAPI.io Places API key (free tier available)
 
+    # --- AUTHENTICATION MODE ---
+    USE_SSO: bool = True  # If true, use SSO flow to bypass captcha
+    MASS_JITTER_MAX: int = 120  # Max delay in seconds for mass jitter
+
     # --- LOGGING ---
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "console"  # "console" or "json" for Loki/Grafana
@@ -122,8 +126,7 @@ settings: Settings = get_settings()
 # --- SHARED IDENTITY CONSTANTS ---
 # Used for bypassing WAF/SSO detection with consistent browser fingerprinting
 MASTER_IDENTITY_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 MASTER_IDENTITY_HEADERS = {
     "Accept": (
@@ -136,5 +139,5 @@ MASTER_IDENTITY_HEADERS = {
     "Pragma": "no-cache",
     "Sec-Ch-Ua-Mobile": "?0",
     "Sec-Ch-Ua-Platform": '"Windows"',
-    "Upgrade-Insecure-Requests": "1"
+    "Upgrade-Insecure-Requests": "1",
 }

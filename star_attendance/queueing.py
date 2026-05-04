@@ -81,13 +81,5 @@ async def enqueue_presence_task(nip: str, is_manual: bool = False, action: str =
     """
     pool = await get_queue_pool()
     queries = Queries.from_asyncpg_pool(pool)
-    payload = {
-        "nip": nip,
-        "action": action,
-        "source": "manual_api" if is_manual else "scheduler_auto"
-    }
-    await queries.enqueue(
-        ["attendance.process"],
-        [encode_queue_payload(payload)],
-        [0]
-    )
+    payload = {"nip": nip, "action": action, "source": "manual_api" if is_manual else "scheduler_auto"}
+    await queries.enqueue(["attendance.process"], [encode_queue_payload(payload)], [0])

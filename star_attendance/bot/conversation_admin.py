@@ -16,8 +16,9 @@ from star_attendance.bot.constants import (
     WAIT_ADMIN_CONFIRM_DEL,
     WAIT_ADMIN_INPUT_VAL,
 )
-from star_attendance.runtime import get_internal_api_client
 from star_attendance.core.utils import get_action_label
+from star_attendance.runtime import get_internal_api_client
+from star_attendance.sso_handler import sync_sso_data
 
 from .conversation_shared import GLOBAL_SETTING_LABELS, store, validate_global_setting, validate_nip
 from .handler_views import (
@@ -27,7 +28,6 @@ from .handler_views import (
     get_global_settings_keyboard,
 )
 from .ui import get_upt_keyboard, is_admin
-from star_attendance.sso_handler import sync_sso_data
 
 internal_api = get_internal_api_client()
 
@@ -265,7 +265,9 @@ async def admin_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 reply_markup=build_user_manage_keyboard(refreshed_user["nip"]),
             )
         else:
-            await update.message.reply_text(f"✅ Data <code>{field.upper()}</code> berhasil diperbarui.", parse_mode="HTML")
+            await update.message.reply_text(
+                f"✅ Data <code>{field.upper()}</code> berhasil diperbarui.", parse_mode="HTML"
+            )
         await _sync_scheduler_notice(update)
     elif update.message:
         await update.message.reply_text("❌ Gagal memperbarui data. Pastikan target valid.")
@@ -342,8 +344,7 @@ async def admin_add_pass(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Perform SSO Sync
     status_msg = await update.message.reply_text(
-        "🔍 <b>SINKRONISASI SSO</b>\n────────────────\n"
-        "Menghubungkan ke server demo-sso...",
+        "🔍 <b>SINKRONISASI SSO</b>\n────────────────\nMenghubungkan ke server demo-sso...",
         parse_mode="HTML",
     )
 

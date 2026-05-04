@@ -29,17 +29,9 @@ from .conversation_settings import (
 )
 from .conversation_shared import (
     get_user_id,
-)
-from .conversation_shared import (
     parse_bool,
-)
-from .conversation_shared import (
     parse_workdays,
-)
-from .conversation_shared import (
     validate_global_setting,
-)
-from .conversation_shared import (
     validate_time_text,
 )
 

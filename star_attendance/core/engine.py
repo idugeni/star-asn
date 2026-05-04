@@ -25,7 +25,7 @@ from star_attendance.core.utils import (
     success,
     warning,
 )
-from star_attendance.login_handler import CookieData, LoginHandler, MASTER_IDENTITY_HEADERS, MASTER_IDENTITY_UA
+from star_attendance.login_handler import MASTER_IDENTITY_HEADERS, MASTER_IDENTITY_UA, CookieData, LoginHandler
 from star_attendance.runtime import get_store
 
 LOGIN_FAILURE_STAGE_MESSAGES = {
@@ -80,11 +80,7 @@ class AttendanceEngine:
         self.client.headers.update(self.headers)
 
         # Initialize LoginHandler with matching identity and proxy
-        self.login_handler = LoginHandler(
-            base_url=self.base_url,
-            user_agent=self.user_agent,
-            proxy=self.proxy
-        )
+        self.login_handler = LoginHandler(base_url=self.base_url, user_agent=self.user_agent, proxy=self.proxy)
 
         self.user_info = {"nama": "Unknown", "nip": self.nip, "upt": "Unknown"}
         self.last_response_time = 0.0
@@ -103,7 +99,10 @@ class AttendanceEngine:
         if not cookies:
             return
         if isinstance(cookies, Mapping):
-            self.client.cookies.update(dict(cookies))
+            for name, value in cookies.items():
+                self.client.cookies.set(name, value, domain="star-asn.kemenimipas.go.id")
+                self.client.cookies.set(name, value, domain=".star-asn.kemenimipas.go.id")
+                self.client.cookies.set(name, value, domain=".kemenimipas.go.id")
             return
         if isinstance(cookies, list):
             # --- "MASTER OF MASTER" INJECTION ---
@@ -167,7 +166,7 @@ class AttendanceEngine:
             return "🔒 Kesalahan Sertifikat SSL Portal."
         if "502" in err_str or "503" in err_str or "504" in err_str:
             return "🚧 Portal sedang down atau overload (Gateway Error)."
-        
+
         if message:
             return str(message)
 
@@ -192,7 +191,13 @@ class AttendanceEngine:
                     f"Ditemukan sesi tersimpan (captured: {saved_session.get('captured_at', 'unknown')}). Mencoba resume...",
                     scope=self.scope,
                 )
-                self.client.cookies.update(saved_session["cookies"])
+                if isinstance(saved_session["cookies"], dict):
+                    for name, value in saved_session["cookies"].items():
+                        self.client.cookies.set(name, value, domain="star-asn.kemenimipas.go.id")
+                        self.client.cookies.set(name, value, domain=".star-asn.kemenimipas.go.id")
+                        self.client.cookies.set(name, value, domain=".kemenimipas.go.id")
+                else:
+                    self.client.cookies.update(saved_session["cookies"])
                 if saved_session.get("user_agent"):
                     self.user_agent = saved_session["user_agent"]
                     self.client.headers["User-Agent"] = self.user_agent
@@ -313,7 +318,13 @@ class AttendanceEngine:
             saved_session = self.store.get_user_session(self.nip)
             if saved_session and saved_session.get("cookies"):
                 try:
-                    self.client.cookies.update(saved_session["cookies"])
+                    if isinstance(saved_session["cookies"], dict):
+                        for name, value in saved_session["cookies"].items():
+                            self.client.cookies.set(name, value, domain="star-asn.kemenimipas.go.id")
+                            self.client.cookies.set(name, value, domain=".star-asn.kemenimipas.go.id")
+                            self.client.cookies.set(name, value, domain=".kemenimipas.go.id")
+                    else:
+                        self.client.cookies.update(saved_session["cookies"])
                     if saved_session.get("user_agent"):
                         self.user_agent = saved_session["user_agent"]
                         self.client.headers["User-Agent"] = self.user_agent
@@ -438,9 +449,11 @@ class AttendanceEngine:
             if "login" in str(resp.url).lower() or "<title>Login" in resp.text:
                 error("Sesi tidak valid (diarahkan ke login).", scope=self.scope)
                 self.csrf_token = None
+                self._last_dashboard_soup = None
                 return False
 
             soup = BeautifulSoup(resp.text, "html.parser")
+            self._last_dashboard_soup = soup
 
             # Extract name
             name_el = soup.find("span", class_="user-name-text")
@@ -505,28 +518,34 @@ class AttendanceEngine:
                 self.accumulated_logs = stop_log_collection()
                 return False
 
-            soup = None
-            for attempt in range(2):
-                if self.store.is_mass_stop_requested():
-                    self.accumulated_logs = stop_log_collection()
-                    return False
-                resp = await self.client.get(f"{self.base_url}/home/dashboard")
-                if resp.status_code == 429:
-                    error("Error 429: Too Many Requests. Menunggu 30 detik...", scope=self.scope)
-                    await asyncio.sleep(30)
-                    continue
-                if "login" in str(resp.url).lower() or "<title>Login" in resp.text:
-                    if self.active_password and await self.perform_login(self.nip, self.active_password):
+            soup = getattr(self, "_last_dashboard_soup", None)
+            if soup is None:
+                for attempt in range(2):
+                    if self.store.is_mass_stop_requested():
+                        self.accumulated_logs = stop_log_collection()
+                        return False
+                    resp = await self.client.get(f"{self.base_url}/home/dashboard")
+                    if resp.status_code == 429:
+                        error("Error 429: Too Many Requests. Menunggu 30 detik...", scope=self.scope)
+                        await asyncio.sleep(30)
                         continue
-                    error("Sesi tidak valid (diarahkan ke login).", scope=self.scope)
-                    self.store.add_audit_log(self.nip, self.action, "failed", "Sesi tidak valid (login)")
-                    self.accumulated_logs = stop_log_collection()
-                    return False
-                if resp.status_code >= 500:
-                    await asyncio.sleep(1.5)
-                    continue
-                soup = BeautifulSoup(resp.text, "html.parser")
-                break
+                    if "login" in str(resp.url).lower() or "<title>Login" in resp.text:
+                        if self.active_password and await self.perform_login(self.nip, self.active_password):
+                            continue
+                        error("Sesi tidak valid (diarahkan ke login).", scope=self.scope)
+                        self.store.add_audit_log(self.nip, self.action, "failed", "Sesi tidak valid (login)")
+                        self.accumulated_logs = stop_log_collection()
+                        return False
+                    if resp.status_code >= 500:
+                        await asyncio.sleep(1.5)
+                        continue
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    self._last_dashboard_soup = soup
+                    break
+            else:
+                # Clear for the next attendance execution just in case
+                self._last_dashboard_soup = None
+
             if soup is None:
                 error("Gagal memuat dashboard.", scope=self.scope)
                 self.store.add_audit_log(self.nip, self.action, "failed", "Gagal memuat dashboard")
@@ -639,7 +658,10 @@ class AttendanceEngine:
                             if json_resp and (
                                 json_resp.get("status") == "success" or "berhasil" in str(json_resp).lower()
                             ):
-                                success(f"ABSEN {get_action_label(self.action)} BERHASIL! Resp: {json_resp}", scope=self.scope)
+                                success(
+                                    f"ABSEN {get_action_label(self.action)} BERHASIL! Resp: {json_resp}",
+                                    scope=self.scope,
+                                )
                                 self.store.add_audit_log(
                                     self.nip, self.action, "success", "Berhasil submit absen", presence_response_time
                                 )
@@ -652,7 +674,9 @@ class AttendanceEngine:
                             # Check if HTML response indicates success
                             if "berhasil" in post_resp.text.lower():
                                 # 1. Inject Global WAF context if available
-                                if LoginHandler.shared_waf_cookies and isinstance(LoginHandler.shared_waf_cookies, list):
+                                if LoginHandler.shared_waf_cookies and isinstance(
+                                    LoginHandler.shared_waf_cookies, list
+                                ):
                                     for c in LoginHandler.shared_waf_cookies:
                                         if not isinstance(c, dict):
                                             continue
@@ -666,7 +690,9 @@ class AttendanceEngine:
                                             )
                                         except Exception:
                                             continue
-                                success(f"ABSEN {get_action_label(self.action)} BERHASIL (HTML Resp)!", scope=self.scope)
+                                success(
+                                    f"ABSEN {get_action_label(self.action)} BERHASIL (HTML Resp)!", scope=self.scope
+                                )
                                 self.store.add_audit_log(
                                     self.nip,
                                     self.action,

@@ -58,8 +58,7 @@ async def show_history(message: Message, *, services: CallbackServices, tid: int
         icon = "✅" if log_entry["status"] == "success" else "❌"
         action_name = "PRESENSI MASUK" if log_entry["action"].lower() == "in" else "PRESENSI PULANG"
         response += (
-            f"{icon} <b>{action_name}</b>\n"
-            f"   └ <code>{format_formal_timestamp(log_entry['timestamp'])}</code>\n"
+            f"{icon} <b>{action_name}</b>\n   └ <code>{format_formal_timestamp(log_entry['timestamp'])}</code>\n"
         )
     await services.edit_message(message, response, InlineKeyboardMarkup([[get_back_button()]]))
 
@@ -162,43 +161,68 @@ async def sync_sso_profile(message: Message, *, services: CallbackServices, tid:
                 f"────────────────\n"
                 f"<i>Mohon tunggu, sedang memproses identitas...</i>",
                 parse_mode=constants.ParseMode.HTML,
-                reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]])
+                reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]]),
             )
-        except: pass
+        except:
+            pass
 
     try:
         # Use existing credentials for SSO with progress reporting
         res = await sync_sso_data(user["nip"], user["password"], on_progress=sso_progress)
-        
+
         if res["status"] == "success":
             await sso_progress("💾 Menyimpan data ke database...")
             data = res["data"]
             # Update user profile in local DB
             update_payload = {}
-            if data.get("nama"): update_payload["nama"] = data["nama"]
-            if data.get("nama_upt"): update_payload["upt_id"] = data["nama_upt"]
-            if data.get("jabatan"): update_payload["jabatan"] = data["jabatan"]
-            if data.get("divisi"): update_payload["divisi"] = data["divisi"]
-            if data.get("pangkat"): update_payload["pangkat"] = data["pangkat"]
-            if data.get("email"): update_payload["email"] = data["email"]
-            if data.get("sso_sub"): update_payload["sso_sub"] = data["sso_sub"]
-            if data.get("birth_date"): update_payload["birth_date"] = data["birth_date"]
-            if data.get("birth_place"): update_payload["birth_place"] = data["birth_place"]
+            if data.get("nama"):
+                update_payload["nama"] = data["nama"]
+            if data.get("nama_upt"):
+                update_payload["upt_id"] = data["nama_upt"]
+            if data.get("jabatan"):
+                update_payload["jabatan"] = data["jabatan"]
+            if data.get("divisi"):
+                update_payload["divisi"] = data["divisi"]
+            if data.get("pangkat"):
+                update_payload["pangkat"] = data["pangkat"]
+            if data.get("email"):
+                update_payload["email"] = data["email"]
+            if data.get("sso_sub"):
+                update_payload["sso_sub"] = data["sso_sub"]
+            if data.get("birth_date"):
+                update_payload["birth_date"] = data["birth_date"]
+            if data.get("birth_place"):
+                update_payload["birth_place"] = data["birth_place"]
 
             if update_payload:
                 services.store.update_user_settings(user["nip"], update_payload)
 
             # Formatting Date to Indonesian (e.g., 21 September 1998)
-            formatted_birth = data.get('birth_date', '-')
+            formatted_birth = data.get("birth_date", "-")
             if formatted_birth and "-" in formatted_birth:
                 try:
                     parts = formatted_birth.split("-")
-                    months = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+                    months = [
+                        "",
+                        "Januari",
+                        "Februari",
+                        "Maret",
+                        "April",
+                        "Mei",
+                        "Juni",
+                        "Juli",
+                        "Agustus",
+                        "September",
+                        "Oktober",
+                        "November",
+                        "Desember",
+                    ]
                     day = int(parts[2])
                     month = months[int(parts[1])]
                     year = parts[0]
                     formatted_birth = f"{day} {month} {year}"
-                except: pass
+                except:
+                    pass
 
             await message.edit_text(
                 "✅ <b>SINKRONISASI BERHASIL</b>\n"
@@ -213,19 +237,19 @@ async def sync_sso_profile(message: Message, *, services: CallbackServices, tid:
                 f"🎂 <b>Lahir:</b> <code>{data.get('birth_place')}, {formatted_birth}</code>\n"
                 f"📧 <b>Email:</b> <code>{data.get('email')}</code>",
                 parse_mode=constants.ParseMode.HTML,
-                reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]])
+                reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]]),
             )
         else:
             await message.edit_text(
                 f"❌ <b>GAGAL SINKRONISASI</b>\n<code>{res.get('message', 'Unknown Error')}</code>",
                 parse_mode=constants.ParseMode.HTML,
-                reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]])
+                reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]]),
             )
     except Exception as exc:
         await message.edit_text(
             f"❌ <b>SISTEM ERROR</b>\n<code>{exc}</code>",
             parse_mode=constants.ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]])
+            reply_markup=InlineKeyboardMarkup([[get_back_button("view_profile")]]),
         )
 
 
@@ -278,7 +302,7 @@ async def show_system(message: Message, *, services: CallbackServices, tid: int)
 
     response = (
         "<b>🖥 DIAGNOSTIK SISTEM</b>\n────────────────\n"
-        f"⚙️ <b>Beban CPU:</b> <code>{psutil.cpu_percent(interval=0.1)}%</code>\n"
+        f"⚙️ <b>Beban CPU:</b> <code>{psutil.cpu_percent(interval=None)}%</code>\n"
         f"🧠 <b>Penggunaan RAM:</b> <code>{psutil.virtual_memory().percent}%</code>\n"
         f"⏳ <b>Uptime Server:</b> <code>{int(time.time() - psutil.boot_time()) // 3600} jam</code>\n"
         f"🗄 <b>Runtime:</b> {health_text}\n"
@@ -398,7 +422,7 @@ async def trigger_single_action(
         f"👤 <b>Target:</b> <code>{user['nama']}</code>\n"
         "<i>Mohon tunggu, sedang melakukan verifikasi keamanan & memproses data.</i>",
         parse_mode=constants.ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup([[get_back_button(f"manage_user_{target_nip}")]])
+        reply_markup=InlineKeyboardMarkup([[get_back_button(f"manage_user_{target_nip}")]]),
     )
 
     # 2. Prepare options
@@ -423,7 +447,9 @@ async def trigger_single_action(
                 f"<i>{status_msg}</i>"
             )
             if isinstance(sent_msg, Message):
-                await services.edit_message(sent_msg, updated_text, InlineKeyboardMarkup([[get_back_button(f"manage_user_{target_nip}")]]))
+                await services.edit_message(
+                    sent_msg, updated_text, InlineKeyboardMarkup([[get_back_button(f"manage_user_{target_nip}")]])
+                )
         except Exception:
             pass
 
@@ -480,6 +506,7 @@ async def handle_callback(
     data = query.data or ""
     message = query.message
     from star_attendance.core.utils import log as core_log
+
     core_log("INFO", f"callback-received data={data} user={tid}", scope="BOT")
 
     try:
@@ -568,7 +595,9 @@ async def handle_callback(
             )
             return
         if data in {"trigger_in", "trigger_out"}:
-            await trigger_mass_action(message, context, services=services, tid=tid, action=cast(str, data).split("_")[1])
+            await trigger_mass_action(
+                message, context, services=services, tid=tid, action=cast(str, data).split("_")[1]
+            )
             return
         if data == "trigger_stop":
             await trigger_stop(message, services=services, tid=tid)
@@ -614,21 +643,35 @@ async def handle_callback(
                 period_code = parts[1]
                 year_text = parts[2]
                 target_nip = parts[3] if len(parts) > 3 else None
-                
+
                 # Check if we have data locally
                 nip: str | None = target_nip
                 if not nip:
                     u = services.store.get_user_by_telegram_id(tid)
                     nip = u["nip"] if u else None
-                
+
                 if nip:
                     allowances = get_allowance_rows(services.store, nip, period_code, int(year_text))
                     if allowances:
                         # Data exists, just show it
-                        await show_allowance(message, services=services, tid=tid, period_code=period_code, year=int(year_text), target_nip=target_nip)
+                        await show_allowance(
+                            message,
+                            services=services,
+                            tid=tid,
+                            period_code=period_code,
+                            year=int(year_text),
+                            target_nip=target_nip,
+                        )
                     else:
                         # No data, auto-sync
-                        await sync_allowance(message, services=services, tid=tid, period_code=period_code, year=int(year_text), target_nip=target_nip)
+                        await sync_allowance(
+                            message,
+                            services=services,
+                            tid=tid,
+                            period_code=period_code,
+                            year=int(year_text),
+                            target_nip=target_nip,
+                        )
                 else:
                     await show_allowance(message, services=services, tid=tid)
             except Exception:
@@ -656,6 +699,7 @@ async def handle_callback(
             return
     except Exception as exc:
         from star_attendance.core.utils import log as core_log
+
         core_log("ERROR", f"callback-error data={data} user={tid} error={exc}", scope="BOT")
         try:
             await query.edit_message_text(
@@ -765,10 +809,8 @@ async def show_allowance(
 
             total_sum = sum(parse_idr(item["total"]) for item in allowances)
             total_deduction = sum(parse_idr(item["deduction_amount"]) for item in allowances)
-            formatted_sum = "{:,.2f}".format(total_sum).replace(",", "X").replace(".", ",").replace("X", ".")
-            formatted_deduction = (
-                "{:,.2f}".format(total_deduction).replace(",", "X").replace(".", ",").replace("X", ".")
-            )
+            formatted_sum = f"{total_sum:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            formatted_deduction = f"{total_deduction:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         except Exception:
             formatted_sum = "ERROR"
             formatted_deduction = "ERROR"
@@ -799,7 +841,7 @@ async def show_allowance(
         [
             InlineKeyboardButton(
                 "📅 LIHAT PERIODE LAIN",
-                callback_data=f"allowance_periods|{target_year}" + (f"|{target_nip}" if target_nip else "")
+                callback_data=f"allowance_periods|{target_year}" + (f"|{target_nip}" if target_nip else ""),
             )
         ],
     ]
@@ -852,12 +894,7 @@ async def show_allowance_period_selector(
             for option in AllowanceHandler.build_fallback_period_options(target_year)
         ]
 
-    response = (
-        "<b>🗓 PILIH PERIODE TUNJANGAN</b>\n"
-        f"🗓 Tahun: <code>{target_year}</code>\n"
-        "────────────────\n"
-        f"{note}"
-    )
+    response = f"<b>🗓 PILIH PERIODE TUNJANGAN</b>\n🗓 Tahun: <code>{target_year}</code>\n────────────────\n{note}"
 
     keyboard: list[list[InlineKeyboardButton]] = []
     current_row: list[InlineKeyboardButton] = []
